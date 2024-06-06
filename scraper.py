@@ -96,7 +96,7 @@ def process_gameloot_stock():
                 print("New Listing /Back in Stock")
         else:
             print("New Listing /Back in Stock")
-            new_item=f"\n{product['name']} - {product['price']} - {product['link']}"
+            new_item=f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_new_item_text=all_new_item_text+new_item
         print("Inserting to Mongo")
         update = {"$set": product}
@@ -113,10 +113,15 @@ def process_gameloot_stock():
             query = {"link": db_product["link"]}
             mongo_col.update_one(query, update, upsert=True)
             print("Sold, Not in Stock anymore")
-            sold_item=f"\n{product['name']} - {product['price']} - {product['link']}"
+            sold_item=f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_sold_item_text=all_sold_item_text+sold_item
 
     print("Sending Telegream Messages")
+    if all_new_item_text=='NEW PRODUCT IN STOCK:':
+        all_new_item_text+="\n\n-No new items"
+    if all_sold_item_text=='PRODUCT SOLD, NOLONGER IN STOCK:':
+        all_sold_item_text+="\n\n-No new items"
+        
     asyncio.run(send_telegram_message( all_new_item_text))
     asyncio.run(send_telegram_message( all_sold_item_text))
     print("Completed")
