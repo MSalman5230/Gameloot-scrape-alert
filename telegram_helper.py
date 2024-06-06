@@ -29,5 +29,5 @@ if __name__ == "__main__":
     #get_chat_id()
     list1=["messi","Ronandlo"]
     #send_telegram_message(message)
-    asyncio.run(send_telegram_message( list1))
+    #asyncio.run(send_telegram_message( list1))
     #send_telegram_message(chat_id, message)
