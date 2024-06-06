@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import pymongo
 import asyncio
 import time
+from datetime import datetime
 from telegram_helper import send_telegram_message
 
 
@@ -122,11 +123,25 @@ def process_gameloot_stock():
     asyncio.run(send_telegram_message(all_sold_item_text))
     print("Completed")
 
+def is_time_between(start_time, end_time, check_time):
+    if start_time < end_time:
+        return start_time <= check_time < end_time
+    else: # Over midnight
+        return start_time <= check_time or check_time < end_time
 
 def run_in_loop():
+    # Define the time range
+    start_time = time(22, 0)  # 10:00 PM
+    end_time = time(7, 0)     # 7:00 AM
+    
+    
     while True:
         process_gameloot_stock()
         print("Sleeping for 1 hr")
+        # Get the current time
+        current_time = datetime.now().time()
+        if is_time_between(start_time, end_time, current_time):
+            time.sleep(3600*9)
         time.sleep(3600)
 
 
