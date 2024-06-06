@@ -7,11 +7,35 @@ load_dotenv()
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_IDS=[6071212724,]
 print(CHAT_IDS)
+def split_paragraph(paragraph, max_length=4096):
+    if len(paragraph) <= max_length:
+        return [paragraph]
+
+    lines = paragraph.split('\n')
+    parts = []
+    current_part = ""
+
+    for line in lines:
+        if len(current_part) + len(line) + 1 <= max_length:  # +1 for the newline character
+            if current_part:
+                current_part += '\n'
+            current_part += line
+        else:
+            parts.append(current_part)
+            current_part = line
+
+    # Don't forget to add the last part
+    if current_part:
+        parts.append(current_part)
+
+    return parts
+
 async def send_telegram_message(message):
     bot = Bot(token=BOT_TOKEN)
     for chat_id in CHAT_IDS:
         print("CHAT id: ",chat_id)
-        await bot.send_message(chat_id=chat_id, text=message)
+        for msg in  split_paragraph(message):
+            await bot.send_message(chat_id=chat_id, text=msg)
 
 def get_chat_id():
     token=BOT_TOKEN
