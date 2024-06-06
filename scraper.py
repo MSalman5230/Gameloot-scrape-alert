@@ -117,10 +117,8 @@ def process_gameloot_stock():
             all_sold_item_text=all_sold_item_text+sold_item
 
     print("Sending Telegream Messages")
-    print(f"lenght of all_new_item_text {len(all_new_item_text)}")
-
-    #asyncio.run(send_telegram_message( all_new_item_text))
-    #asyncio.run(send_telegram_message( all_sold_item_text))
+    asyncio.run(send_telegram_message( all_new_item_text))
+    asyncio.run(send_telegram_message( all_sold_item_text))
     print("Completed")
 
 def run_in_loop():
