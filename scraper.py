@@ -2,7 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 import pymongo
 import asyncio
+import time
 from telegram_helper import send_telegram_message
+
 def get_mongo_conn(collection):
     client = pymongo.MongoClient("mongodb://huruhuru:huruhuru42@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru")
     db = client["huruhuru"]
@@ -116,8 +118,13 @@ def process_gameloot_stock():
     asyncio.run(send_telegram_message( all_new_item_text))
     asyncio.run(send_telegram_message( all_sold_item_text))
 
+def run_in_loop():
+    while True:
+        process_gameloot_stock()
+        time.sleep(3600)
 
 if __name__ == "__main__":
-    process_gameloot_stock()
+    run_in_loop()
+
 
 
