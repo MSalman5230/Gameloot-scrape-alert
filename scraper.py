@@ -115,12 +115,15 @@ def process_gameloot_stock():
             sold_item=f"\n{product['name']} - {product['price']} - {product['link']}"
             all_sold_item_text=all_sold_item_text+sold_item
 
+    print("Sending Telegream Messages")
     asyncio.run(send_telegram_message( all_new_item_text))
     asyncio.run(send_telegram_message( all_sold_item_text))
+    print("Completed")
 
 def run_in_loop():
     while True:
         process_gameloot_stock()
+        print("Sleeping for 1 hr")
         time.sleep(3600)
 
 if __name__ == "__main__":
