@@ -69,7 +69,7 @@ def scrape_all_products(base_url):
         url = f"{base_url}/page/{page_number}/?swoof=1&stock=instock&orderby=price"
         products = scrape_product_page(url)
         if not products:
-            logging.info(f"Scraping page: {page_number}")
+            logging.info(f"No more product listing. End of page")
             break
         all_products.extend(products)
         page_number += 1
