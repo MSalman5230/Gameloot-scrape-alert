@@ -169,5 +169,5 @@ def run_in_loop():
 
 
 if __name__ == "__main__":
-    #run_in_loop()
-    process_gameloot_stock()
+    run_in_loop()
+    #process_gameloot_stock()
