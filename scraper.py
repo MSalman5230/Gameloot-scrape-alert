@@ -86,6 +86,8 @@ def process_gameloot_stock():
     link_set = set()
     all_new_item_text = "NEW PRODUCT IN STOCK:"
     all_sold_item_text = "PRODUCT SOLD, NOLONGER IN STOCK:"
+    count_new_items=0
+    count_sold_items=0
     for product in all_products:
         query = {"link": product["link"]}
         link_set.add(product["link"])
@@ -97,6 +99,8 @@ def process_gameloot_stock():
             print("New Listing /Back in Stock")
             new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_new_item_text = all_new_item_text + new_item
+            count_new_items+=1
+
         print("Inserting to Mongo")
         update = {"$set": product}
         mongo_col.update_one(query, update, upsert=True)
@@ -112,15 +116,13 @@ def process_gameloot_stock():
             print("Sold, Not in Stock anymore")
             sold_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_sold_item_text = all_sold_item_text + sold_item
+            count_sold_items+=1
 
     print("Sending Telegream Messages")
-    if all_new_item_text == "NEW PRODUCT IN STOCK:":
-        all_new_item_text += "\n\n-No new items"
-    if all_sold_item_text == "PRODUCT SOLD, NOLONGER IN STOCK:":
-        all_sold_item_text += "\n\n-No new items"
-
-    asyncio.run(send_telegram_message(all_new_item_text))
-    asyncio.run(send_telegram_message(all_sold_item_text))
+    if count_new_items>1:
+        asyncio.run(send_telegram_message(all_new_item_text))
+    if count_sold_items>1:
+        asyncio.run(send_telegram_message(all_sold_item_text))
     print("Completed")
 
 def is_time_between(start_time, end_time, check_time):
@@ -137,12 +139,8 @@ def run_in_loop():
     
     while True:
         process_gameloot_stock()
-        print("Sleeping for 1 hr")
-        # Get the current time
-        current_time = datetime.now().time()
-        if is_time_between(start_time, end_time, current_time):
-            time.sleep(3600*9)
-        time.sleep(3600)
+        print("Sleeping for 30 hr")  
+        time.sleep(1800)
 
 
 if __name__ == "__main__":
