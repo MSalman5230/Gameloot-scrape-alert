@@ -80,7 +80,6 @@ def process_gameloot_stock():
     logging.info(f"Started at: {datetime.now()}")
     base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
-
     # Print the extracted product details
     for product in all_products:
         # print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
@@ -129,9 +128,9 @@ def process_gameloot_stock():
     logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
     logging.info(f"# No Longer in Stock: {count_sold_items}")
     logging.info("Sending Telegram Messages")
-    if count_new_items > 1:
+    if count_new_items >= 1:
         asyncio.run(send_telegram_message(all_new_item_text))
-    if count_sold_items > 1:
+    if count_sold_items >= 1:
         asyncio.run(send_telegram_message(all_sold_item_text))
     logging.info("Completed")
 
