@@ -4,7 +4,10 @@ import pymongo
 import asyncio
 import time
 from datetime import datetime
+import logging
+import os
 from telegram_helper import send_telegram_message
+import logging_config
 
 
 def get_mongo_conn(collection):
@@ -62,11 +65,11 @@ def scrape_all_products(base_url):
     all_products = []
     page_number = 1
     while True:
-        print("Scraping page", page_number)
+        logging.info(f"Scraping page: {page_number}")
         url = f"{base_url}/page/{page_number}/?swoof=1&stock=instock&orderby=price"
         products = scrape_product_page(url)
         if not products:
-            print("No More product listing")
+            logging.info(f"Scraping page: {page_number}")
             break
         all_products.extend(products)
         page_number += 1
@@ -74,34 +77,39 @@ def scrape_all_products(base_url):
 
 
 def process_gameloot_stock():
-    print("Started")
+    logging.info(f"Started at: {datetime.now()}")
     base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
 
     # Print the extracted product details
     for product in all_products:
-        print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
+        # print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
+        logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
 
     mongo_col = get_mongo_conn("gameloot_gpu")
     link_set = set()
-    all_new_item_text = "NEW PRODUCT IN STOCK:"
-    all_sold_item_text = "PRODUCT SOLD, NOLONGER IN STOCK:"
-    count_new_items=0
-    count_sold_items=0
+    all_new_item_text = "NEW PRODUCT IN STOCK! :"
+    all_sold_item_text = "NO LONGER IN STOCK, SOLD!:"
+    count_new_items = 0
+    count_sold_items = 0
     for product in all_products:
         query = {"link": product["link"]}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
-            if result["inStock"] == False:
-                print("New Listing /Back in Stock")
-        else:
-            print("New Listing /Back in Stock")
+            if result["inStock"] == False:  # Product which were our of stock in db
+                logging.info(f"Back in Stock: {product['name']}, {product['price']}")
+                new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
+                all_new_item_text = all_new_item_text + new_item
+                count_new_items += 1
+
+        else:  # New Product not in db
+            logging.info(f"New Listing: {product['name']}, {product['price']}")
             new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_new_item_text = all_new_item_text + new_item
-            count_new_items+=1
+            count_new_items += 1
 
-        print("Inserting to Mongo")
+        # print("Inserting to Mongo")
         update = {"$set": product}
         mongo_col.update_one(query, update, upsert=True)
 
@@ -113,33 +121,26 @@ def process_gameloot_stock():
             update = {"$set": {"inStock": False}}
             query = {"link": db_product["link"]}
             mongo_col.update_one(query, update, upsert=True)
-            print("Sold, Not in Stock anymore")
+            logging.info(f"No Longer in Stock: {product['name']}, {product['price']}")
             sold_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
             all_sold_item_text = all_sold_item_text + sold_item
-            count_sold_items+=1
+            count_sold_items += 1
 
-    print("Sending Telegream Messages")
-    if count_new_items>1:
+    logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
+    logging.info(f"# No Longer in Stock: {count_sold_items}")
+    logging.info("Sending Telegream Messages")
+    if count_new_items > 1:
         asyncio.run(send_telegram_message(all_new_item_text))
-    if count_sold_items>1:
+    if count_sold_items > 1:
         asyncio.run(send_telegram_message(all_sold_item_text))
-    print("Completed")
+    logging.info("Completed")
 
-def is_time_between(start_time, end_time, check_time):
-    if start_time < end_time:
-        return start_time <= check_time < end_time
-    else: # Over midnight
-        return start_time <= check_time or check_time < end_time
 
 def run_in_loop():
-    # Define the time range
-    start_time = time(22, 0)  # 10:00 PM
-    end_time = time(7, 0)     # 7:00 AM
-    
-    
+
     while True:
         process_gameloot_stock()
-        print("Sleeping for 30 hr")  
+        print("Sleeping for 30 min")
         time.sleep(1800)
 
 
