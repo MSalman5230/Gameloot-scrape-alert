@@ -31,6 +31,19 @@ def clean_product_name(name):
         return name[:pos].strip()
     return name.strip()
 
+def remove_list_duplicates(dict_list):
+    logging.info("removing product duplicate")
+    logging.info(f"Original list length: {len(dict_list)}")
+    # Convert each dictionary to a tuple of sorted items
+    tuple_list = [tuple(sorted(d.items())) for d in dict_list]
+    
+    # Remove duplicates by converting the list of tuples to a set
+    unique_tuples = set(tuple_list)
+    
+    # Convert the tuples back to dictionaries
+    unique_dict_list = [dict(t) for t in unique_tuples]
+    logging.info(f"Deduplicate list length: {len(unique_dict_list)}")
+    return unique_dict_list
 
 def scrape_product_page(url):
     response = requests.get(url)
@@ -80,9 +93,10 @@ def process_gameloot_stock():
     logging.info(f"Started at: {datetime.now()}")
     base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
+    all_products = remove_list_duplicates(all_products)
     # Print the extracted product details
     for product in all_products:
-        # print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
+        #print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
     mongo_col = get_mongo_conn("gameloot_gpu")
@@ -92,13 +106,13 @@ def process_gameloot_stock():
     count_new_items = 0
     count_sold_items = 0
     for product in all_products:
-        # print('*************')
+        #print('*************')
         query = {"link": product["link"]}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
             if result["inStock"] == False:  # Product which were our of stock in db
-                # print("RESULT",result)
+                print("RESULT",result)
                 logging.info(f"Back in Stock: {product['name']}, {product['price']}, {product['link']}")
                 new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
                 all_new_item_text = all_new_item_text + new_item
@@ -116,11 +130,11 @@ def process_gameloot_stock():
         if not query_res.raw_result["ok"]:
             print(query_res.raw_result)
             raise Exception("Mongo update failed: ", query_res.raw_result)
-
+    
     result = mongo_col.find()
     for db_product in result:
-        # print('------------------')
-        # print(db_product)
+        #print('------------------')
+        #print(db_product)
         if db_product["link"] in link_set:
             # print("Its in set")
             continue
@@ -155,5 +169,5 @@ def run_in_loop():
 
 
 if __name__ == "__main__":
-    run_in_loop()
-    # process_gameloot_stock()
+    #run_in_loop()
+    process_gameloot_stock()
