@@ -82,7 +82,7 @@ def process_gameloot_stock():
     all_products = scrape_all_products(base_url)
     # Print the extracted product details
     for product in all_products:
-        #print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
+        # print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
     mongo_col = get_mongo_conn("gameloot_gpu")
@@ -92,13 +92,13 @@ def process_gameloot_stock():
     count_new_items = 0
     count_sold_items = 0
     for product in all_products:
-        #print('*************')
+        # print('*************')
         query = {"link": product["link"]}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
             if result["inStock"] == False:  # Product which were our of stock in db
-               #print("RESULT",result)
+                # print("RESULT",result)
                 logging.info(f"Back in Stock: {product['name']}, {product['price']}, {product['link']}")
                 new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
                 all_new_item_text = all_new_item_text + new_item
@@ -113,16 +113,16 @@ def process_gameloot_stock():
         # print("Inserting to Mongo")
         update = {"$set": product}
         query_res = mongo_col.update_one(query, update, upsert=True)
-        if not query_res.raw_result['ok']:
+        if not query_res.raw_result["ok"]:
             print(query_res.raw_result)
-            raise Exception('Mongo update failed: ',query_res.raw_result)
+            raise Exception("Mongo update failed: ", query_res.raw_result)
 
     result = mongo_col.find()
     for db_product in result:
-        #print('------------------')
-        #print(db_product)
+        # print('------------------')
+        # print(db_product)
         if db_product["link"] in link_set:
-            #print("Its in set")
+            # print("Its in set")
             continue
         elif db_product["inStock"] == True:
             logging.info(f"No Longer in Stock: {db_product['name']}, {db_product['price']}")
@@ -132,9 +132,9 @@ def process_gameloot_stock():
             update = {"$set": {"inStock": False}}
             query = {"link": db_product["link"]}
             query_res = mongo_col.update_one(query, update, upsert=True)
-            if not query_res.raw_result['ok']:
+            if not query_res.raw_result["ok"]:
                 print(query_res.raw_result)
-                raise Exception('Mongo update failed: ',query_res.raw_result)
+                raise Exception("Mongo update failed: ", query_res.raw_result)
 
     logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
     logging.info(f"# No Longer in Stock: {count_sold_items}")
@@ -155,5 +155,5 @@ def run_in_loop():
 
 
 if __name__ == "__main__":
-    # run_in_loop()
-    process_gameloot_stock()
+    run_in_loop()
+    # process_gameloot_stock()
