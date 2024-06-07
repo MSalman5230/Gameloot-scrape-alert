@@ -128,7 +128,7 @@ def process_gameloot_stock():
 
     logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
     logging.info(f"# No Longer in Stock: {count_sold_items}")
-    logging.info("Sending Telegream Messages")
+    logging.info("Sending Telegram Messages")
     if count_new_items > 1:
         asyncio.run(send_telegram_message(all_new_item_text))
     if count_sold_items > 1:
