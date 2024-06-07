@@ -164,8 +164,8 @@ def run_in_loop():
 
     while True:
         process_gameloot_stock()
-        print("Sleeping for 30 min")
-        time.sleep(1800)
+        print("Sleeping for 15 min")
+        time.sleep(900)
 
 
 if __name__ == "__main__":
