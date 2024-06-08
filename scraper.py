@@ -49,8 +49,9 @@ def remove_list_duplicates(dict_list):
 
 def scrape_product_page(url):
     response = requests.get(url)
-    if response.status_code!=200:
-        return ("Failed")
+    if not (response.status_code==200 or response.status_code==404):
+        print("Correct:",response.status_code)
+        return ["FAILED"]
     webpage_content = response.content
     soup = BeautifulSoup(webpage_content, "html.parser")
     product_containers = soup.find_all("div", class_="kad_product")
@@ -89,6 +90,8 @@ def scrape_all_products(base_url):
             break
         all_products.extend(products)
         page_number += 1
+    if 'FAILED' in all_products:
+        return 'FAILED'
     return all_products
 
 
@@ -96,9 +99,10 @@ def process_gameloot_stock():
     logging.info(f"Started at: {datetime.now()}")
     base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
-    if "Failed" in all_products:
-        logging.warning("Failed to scrape all pages, Try again after sleeping")
-        return 0
+    if 'FAILED' in all_products:
+        logging.warning("FAILED to scrape pages, Try after sleeping")
+        return 'FAILED'
+
     all_products = remove_list_duplicates(all_products)
     # Print the extracted product details
     for product in all_products:
