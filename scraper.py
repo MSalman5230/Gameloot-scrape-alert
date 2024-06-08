@@ -34,6 +34,8 @@ def clean_product_name(name):
 def remove_list_duplicates(dict_list):
     logging.info("removing product duplicate")
     logging.info(f"Original list length: {len(dict_list)}")
+    for i in dict_list:
+        logging.debug(i)
     # Convert each dictionary to a tuple of sorted items
     tuple_list = [tuple(sorted(d.items())) for d in dict_list]
     
@@ -55,7 +57,7 @@ def scrape_product_page(url):
     for container in product_containers:
         name_tag = container.find("h5")
         name = name_tag.text.strip() if name_tag else "No name found"
-
+        logging.debug(name)
         price_tag = container.find("ins")
         if price_tag:
             price = price_tag.find("span", class_="woocommerce-Price-amount").text.strip()
@@ -65,7 +67,6 @@ def scrape_product_page(url):
 
         link_tag = container.find("a", class_="product_item_link")
         href = link_tag["href"] if link_tag else "No link found"
-
         name = clean_product_name(name)
         price = convert_price_to_int(price)
 
@@ -79,7 +80,7 @@ def scrape_all_products(base_url):
     page_number = 1
     while True:
         logging.info(f"Scraping page: {page_number}")
-        url = f"{base_url}/page/{page_number}/?swoof=1&stock=instock&orderby=price"
+        url = f"{base_url}/page/{page_number}/?stock=instock"
         products = scrape_product_page(url)
         if not products:
             logging.info(f"No more product listing. End of page")
@@ -96,7 +97,6 @@ def process_gameloot_stock():
     all_products = remove_list_duplicates(all_products)
     # Print the extracted product details
     for product in all_products:
-        #print(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
     mongo_col = get_mongo_conn("gameloot_gpu")
@@ -105,14 +105,16 @@ def process_gameloot_stock():
     all_sold_item_text = "NO LONGER IN STOCK, SOLD!:"
     count_new_items = 0
     count_sold_items = 0
+    logging.info("Finding new items")
     for product in all_products:
-        #print('*************')
+        logging.debug('*************')
+        logging.debug(product)
         query = {"link": product["link"]}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
             if result["inStock"] == False:  # Product which were our of stock in db
-                print("RESULT",result)
+                logging.debug("RESULT",result)
                 logging.info(f"Back in Stock: {product['name']}, {product['price']}, {product['link']}")
                 new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
                 all_new_item_text = all_new_item_text + new_item
@@ -131,14 +133,16 @@ def process_gameloot_stock():
             print(query_res.raw_result)
             raise Exception("Mongo update failed: ", query_res.raw_result)
     
+    logging.info("Finding Sold Items")
     result = mongo_col.find()
     for db_product in result:
-        #print('------------------')
-        #print(db_product)
+        logging.debug('------------------')
+        logging.debug(db_product)
         if db_product["link"] in link_set:
             # print("Its in set")
             continue
         elif db_product["inStock"] == True:
+            logging.debug("inStock True")
             logging.info(f"No Longer in Stock: {db_product['name']}, {db_product['price']}")
             sold_item = f"\n\n-{db_product['name']} - {db_product['price']} - {db_product['link']}"
             all_sold_item_text = all_sold_item_text + sold_item
@@ -149,7 +153,7 @@ def process_gameloot_stock():
             if not query_res.raw_result["ok"]:
                 print(query_res.raw_result)
                 raise Exception("Mongo update failed: ", query_res.raw_result)
-
+        logging.debug("$$$ Not in SET $$$")
     logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
     logging.info(f"# No Longer in Stock: {count_sold_items}")
     logging.info("Sending Telegram Messages")
@@ -165,6 +169,7 @@ def run_in_loop():
     while True:
         process_gameloot_stock()
         print("Sleeping for 15 min")
+        logging.debug("\n\n\n\n\n\n\n\n\n\n\n\n")
         time.sleep(900)
 
 
