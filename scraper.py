@@ -8,7 +8,7 @@ import logging
 import os
 from telegram_helper import send_telegram_message
 import logging_config
-
+import schedule
 
 def get_mongo_conn(collection):
     client = pymongo.MongoClient("mongodb://huruhuru:huruhuru42@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru")
@@ -95,9 +95,9 @@ def scrape_all_products(base_url):
     return all_products
 
 
-def process_gameloot_stock():
+def process_gameloot_stock(base_url, mongo_col_name):
     logging.info(f"Started at: {datetime.now()}")
-    base_url = "https://gameloot.in/product-category/graphics-card"
+    #base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
     if 'FAILED' in all_products:
         logging.warning("FAILED to scrape pages, Try after sleeping")
@@ -108,7 +108,7 @@ def process_gameloot_stock():
     for product in all_products:
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
-    mongo_col = get_mongo_conn("gameloot_gpu")
+    mongo_col = get_mongo_conn(mongo_col_name)
     link_set = set()
     all_new_item_text = "NEW PRODUCT IN STOCK! :"
     all_sold_item_text = "NO LONGER IN STOCK, SOLD!:"
@@ -172,9 +172,34 @@ def process_gameloot_stock():
         asyncio.run(send_telegram_message(all_sold_item_text))
     logging.info("Completed")
 
+#--------------------------------------------------------------------
+def track_gpu():
+    gpu_base_url="https://gameloot.in/product-category/graphics-card"
+    mongo_col_name='gameloot_gpu'
+    process_gameloot_stock(gpu_base_url,mongo_col_name)
+
+def track_cpu():
+    cpu_base_url="https://gameloot.in/product-category/buy-cpu/"
+    mongo_col_name='gameloot_cpu'
+    process_gameloot_stock(cpu_base_url,mongo_col_name)
+
+def track_mobo():
+    motherboard_base_url="https://gameloot.in/product-category/motherboard/"
+    mongo_col_name='gameloot_mobo'
+    process_gameloot_stock(motherboard_base_url,mongo_col_name)
+
+
+def task_scheduler():
+    schedule.every(15).minutes.do(track_gpu)
+    schedule.every(25).minutes.do(track_cpu)
+    schedule.every(30).minutes.do(track_mobo)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
 
 def run_in_loop():
-
     while True:
         process_gameloot_stock()
         print("Sleeping for 15 min")
@@ -183,5 +208,7 @@ def run_in_loop():
 
 
 if __name__ == "__main__":
-    run_in_loop()
+    task_scheduler()
     #process_gameloot_stock()
+    #track_cpu()
+    #track_mobo()
