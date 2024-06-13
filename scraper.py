@@ -10,6 +10,7 @@ from telegram_helper import send_telegram_message
 import logging_config
 import schedule
 
+
 def get_mongo_conn(collection):
     client = pymongo.MongoClient("mongodb://huruhuru:huruhuru42@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru")
     db = client["huruhuru"]
@@ -31,6 +32,7 @@ def clean_product_name(name):
         return name[:pos].strip()
     return name.strip()
 
+
 def remove_list_duplicates(dict_list):
     logging.info("removing product duplicate")
     logging.info(f"Original list length: {len(dict_list)}")
@@ -38,19 +40,20 @@ def remove_list_duplicates(dict_list):
         logging.debug(i)
     # Convert each dictionary to a tuple of sorted items
     tuple_list = [tuple(sorted(d.items())) for d in dict_list]
-    
+
     # Remove duplicates by converting the list of tuples to a set
     unique_tuples = set(tuple_list)
-    
+
     # Convert the tuples back to dictionaries
     unique_dict_list = [dict(t) for t in unique_tuples]
     logging.info(f"Deduplicate list length: {len(unique_dict_list)}")
     return unique_dict_list
 
+
 def scrape_product_page(url):
     response = requests.get(url)
-    if not (response.status_code==200 or response.status_code==404):
-        print("Correct:",response.status_code)
+    if not (response.status_code == 200 or response.status_code == 404):
+        print("Correct:", response.status_code)
         return ["FAILED"]
     webpage_content = response.content
     soup = BeautifulSoup(webpage_content, "html.parser")
@@ -90,18 +93,18 @@ def scrape_all_products(base_url):
             break
         all_products.extend(products)
         page_number += 1
-    if 'FAILED' in all_products:
-        return 'FAILED'
+    if "FAILED" in all_products:
+        return "FAILED"
     return all_products
 
 
-def process_gameloot_stock(base_url, mongo_col_name):
+def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphics-card", mongo_col_name="gameloot_gpu"):
     logging.info(f"Started at: {datetime.now()}")
-    #base_url = "https://gameloot.in/product-category/graphics-card"
+    # base_url = "https://gameloot.in/product-category/graphics-card"
     all_products = scrape_all_products(base_url)
-    if 'FAILED' in all_products:
+    if "FAILED" in all_products:
         logging.warning("FAILED to scrape pages, Try after sleeping")
-        return 'FAILED'
+        return "FAILED"
 
     all_products = remove_list_duplicates(all_products)
     # Print the extracted product details
@@ -116,14 +119,14 @@ def process_gameloot_stock(base_url, mongo_col_name):
     count_sold_items = 0
     logging.info("Finding new items")
     for product in all_products:
-        logging.debug('*************')
+        logging.debug("*************")
         logging.debug(product)
         query = {"link": product["link"]}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
             if result["inStock"] == False:  # Product which were our of stock in db
-                logging.debug("RESULT",result)
+                logging.debug("RESULT", result)
                 logging.info(f"Back in Stock: {product['name']}, {product['price']}, {product['link']}")
                 new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
                 all_new_item_text = all_new_item_text + new_item
@@ -141,11 +144,11 @@ def process_gameloot_stock(base_url, mongo_col_name):
         if not query_res.raw_result["ok"]:
             print(query_res.raw_result)
             raise Exception("Mongo update failed: ", query_res.raw_result)
-    
+
     logging.info("Finding Sold Items")
     result = mongo_col.find()
     for db_product in result:
-        logging.debug('------------------')
+        logging.debug("------------------")
         logging.debug(db_product)
         if db_product["link"] in link_set:
             # print("Its in set")
@@ -172,21 +175,27 @@ def process_gameloot_stock(base_url, mongo_col_name):
         asyncio.run(send_telegram_message(all_sold_item_text))
     logging.info("Completed")
 
-#--------------------------------------------------------------------
+
+# --------------------------------------------------------------------
 def track_gpu():
-    gpu_base_url="https://gameloot.in/product-category/graphics-card"
-    mongo_col_name='gameloot_gpu'
-    process_gameloot_stock(gpu_base_url,mongo_col_name)
+    logging.info("Tacking GPU")
+    gpu_base_url = "https://gameloot.in/product-category/graphics-card"
+    mongo_col_name = "gameloot_gpu"
+    process_gameloot_stock(gpu_base_url, mongo_col_name)
+
 
 def track_cpu():
-    cpu_base_url="https://gameloot.in/product-category/buy-cpu/"
-    mongo_col_name='gameloot_cpu'
-    process_gameloot_stock(cpu_base_url,mongo_col_name)
+    logging.info("Tacking CPU")
+    cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
+    mongo_col_name = "gameloot_cpu"
+    process_gameloot_stock(cpu_base_url, mongo_col_name)
+
 
 def track_mobo():
-    motherboard_base_url="https://gameloot.in/product-category/motherboard/"
-    mongo_col_name='gameloot_mobo'
-    process_gameloot_stock(motherboard_base_url,mongo_col_name)
+    logging.info("Tacking Mobo")
+    motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
+    mongo_col_name = "gameloot_mobo"
+    process_gameloot_stock(motherboard_base_url, mongo_col_name)
 
 
 def task_scheduler():
@@ -196,7 +205,7 @@ def task_scheduler():
     logging.info("Scheduler started with Jobs:")
     for jobs in schedule.get_jobs():
         print(jobs)
-    
+
     while True:
         schedule.run_pending()
         time.sleep(1)
@@ -212,6 +221,6 @@ def run_in_loop():
 
 if __name__ == "__main__":
     task_scheduler()
-    #process_gameloot_stock()
-    #track_cpu()
-    #track_mobo()
+    # process_gameloot_stock()
+    # track_cpu()
+    # track_mobo()
