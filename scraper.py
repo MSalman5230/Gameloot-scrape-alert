@@ -193,7 +193,10 @@ def task_scheduler():
     schedule.every(15).minutes.do(track_gpu)
     schedule.every(25).minutes.do(track_cpu)
     schedule.every(30).minutes.do(track_mobo)
-
+    logging.info("Scheduler started with Jobs:")
+    for jobs in schedule.get_jobs():
+        print(jobs)
+    
     while True:
         schedule.run_pending()
         time.sleep(1)
