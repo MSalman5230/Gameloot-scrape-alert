@@ -9,7 +9,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_IDS = [
     6071212724,
 ]
-print(CHAT_IDS)
+print("Telegram message chat IDs", CHAT_IDS)
 
 
 def split_paragraph(paragraph, max_length=4096):
