@@ -207,7 +207,10 @@ def task_scheduler():
         print(jobs)
 
     while True:
-        schedule.run_pending()
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            print(e)
         time.sleep(1)
 
 
