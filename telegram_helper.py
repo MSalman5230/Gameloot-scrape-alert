@@ -35,13 +35,33 @@ def split_paragraph(paragraph, max_length=4096):
 
     return parts
 
-
+'''
 async def send_telegram_message(message):
     bot = Bot(token=BOT_TOKEN)
     for chat_id in CHAT_IDS:
         print("CHAT id: ", chat_id)
         for msg in split_paragraph(message):
-            await bot.send_message(chat_id=chat_id, text=msg)
+            await bot.send_message(chat_id=chat_id, text=msg)'''
+
+async def send_telegram_message(message):
+    bot = Bot(token=BOT_TOKEN)
+
+    async def send_with_retry(chat_id, msg, retries=10, delay=10):
+        for attempt in range(retries):
+            try:
+                await bot.send_message(chat_id=chat_id, text=msg)
+                return
+            except Exception as e:
+                print(f"Error sending message to {chat_id}: {e}. Attempt {attempt + 1} of {retries}")
+                if attempt < retries - 1:
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"Failed to send message to {chat_id} after {retries} attempts.")
+    
+    for chat_id in CHAT_IDS:
+        print("CHAT id:", chat_id)
+        for msg in split_paragraph(message):
+            await send_with_retry(chat_id, msg)
 
 
 def get_chat_id():
