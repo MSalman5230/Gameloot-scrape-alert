@@ -198,10 +198,18 @@ def track_mobo():
     process_gameloot_stock(motherboard_base_url, mongo_col_name)
 
 
+def track_ram():
+    logging.info("Tacking Mobo")
+    motherboard_base_url = "https://gameloot.in/product-category/desktop-ram/"
+    mongo_col_name = "gameloot_ram"
+    process_gameloot_stock(motherboard_base_url, mongo_col_name)
+
+
 def task_scheduler():
     schedule.every(15).minutes.do(track_gpu)
     schedule.every(22).minutes.do(track_cpu)
     schedule.every(27).minutes.do(track_mobo)
+    schedule.every(27).minutes.do(track_ram)
     logging.info("Scheduler started with Jobs:")
     for jobs in schedule.get_jobs():
         print(jobs)
@@ -227,3 +235,4 @@ if __name__ == "__main__":
     # process_gameloot_stock()
     # track_cpu()
     # track_mobo()
+    # track_ram()
