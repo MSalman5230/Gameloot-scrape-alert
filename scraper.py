@@ -54,7 +54,7 @@ def scrape_product_page(url):
     response = requests.get(url)
     if not (response.status_code == 200 or response.status_code == 404):
         print("Correct:", response.status_code)
-        return ["FAILED"]
+        return None
     webpage_content = response.content
     soup = BeautifulSoup(webpage_content, "html.parser")
     product_containers = soup.find_all("div", class_="kad_product")
