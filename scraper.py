@@ -209,7 +209,7 @@ def task_scheduler():
     schedule.every(15).minutes.do(track_gpu)
     schedule.every(22).minutes.do(track_cpu)
     schedule.every(27).minutes.do(track_mobo)
-    schedule.every(27).minutes.do(track_ram)
+    #schedule.every(27).minutes.do(track_ram)
     logging.info("Scheduler started with Jobs:")
     for jobs in schedule.get_jobs():
         print(jobs)
