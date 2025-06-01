@@ -178,28 +178,28 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
 
 # --------------------------------------------------------------------
 def track_gpu():
-    logging.info("Tacking GPU")
+    logging.info("Tracking GPU")
     gpu_base_url = "https://gameloot.in/product-category/graphics-card"
     mongo_col_name = "gameloot_gpu"
     process_gameloot_stock(gpu_base_url, mongo_col_name)
 
 
 def track_cpu():
-    logging.info("Tacking CPU")
+    logging.info("Tracking CPU")
     cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
     mongo_col_name = "gameloot_cpu"
     process_gameloot_stock(cpu_base_url, mongo_col_name)
 
 
 def track_mobo():
-    logging.info("Tacking Mobo")
+    logging.info("Tracking Mobo")
     motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
     mongo_col_name = "gameloot_mobo"
     process_gameloot_stock(motherboard_base_url, mongo_col_name)
 
 
 def track_ram():
-    logging.info("Tacking Mobo")
+    logging.info("Tracking Mobo")
     motherboard_base_url = "https://gameloot.in/product-category/desktop-ram/"
     mongo_col_name = "gameloot_ram"
     process_gameloot_stock(motherboard_base_url, mongo_col_name)
