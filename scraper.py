@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import pymongo
+from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMongoError
 import asyncio
 import time
 from datetime import datetime
@@ -9,13 +10,114 @@ import os
 from telegram_helper import send_telegram_message
 import logging_config
 import schedule
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# MongoDB connection settings
+MONGO_CONNECTION_TIMEOUT = 5  # seconds
+MONGO_RETRY_DELAY = 5  # seconds between retries
+MONGO_MAX_RETRY_DELAY = 60  # maximum delay between retries
 
 
-def get_mongo_conn(collection):
-    client = pymongo.MongoClient("mongodb://huruhuru:huruhuru42@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru")
-    db = client["huruhuru"]
-    collection = db[collection]
-    return collection
+def check_mongodb_available(mongo_uri=None, timeout=MONGO_CONNECTION_TIMEOUT):
+    """
+    Check if MongoDB is available and accessible.
+    Returns True if available, False otherwise.
+    """
+    try:
+        if mongo_uri is None:
+            mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        
+        client = pymongo.MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=timeout * 1000
+        )
+        # Try to ping the server
+        client.admin.command('ping')
+        client.close()
+        return True
+    except (ServerSelectionTimeoutError, ConnectionFailure, Exception) as e:
+        logging.debug(f"MongoDB check failed: {e}")
+        return False
+
+
+def wait_for_mongodb(max_wait_time=None, check_interval=MONGO_RETRY_DELAY):
+    """
+    Wait for MongoDB to become available.
+    Blocks until MongoDB is available or max_wait_time is reached.
+    
+    Args:
+        max_wait_time: Maximum time to wait in seconds (None for infinite wait)
+        check_interval: Time between checks in seconds
+    
+    Returns:
+        True if MongoDB is available, False if max_wait_time was reached
+    """
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    start_time = time.time()
+    attempt = 0
+    
+    logging.info("Waiting for MongoDB to become available...")
+    
+    while True:
+        attempt += 1
+        if check_mongodb_available(mongo_uri):
+            elapsed = time.time() - start_time
+            logging.info(f"MongoDB is now available! (waited {elapsed:.1f} seconds, {attempt} attempts)")
+            return True
+        
+        if max_wait_time is not None:
+            elapsed = time.time() - start_time
+            if elapsed >= max_wait_time:
+                logging.error(f"MongoDB not available after {max_wait_time} seconds")
+                return False
+        
+        logging.warning(f"MongoDB not available (attempt {attempt}), retrying in {check_interval} seconds...")
+        time.sleep(check_interval)
+
+
+def get_mongo_conn(collection, retry=True, max_retries=3):
+    """
+    Get MongoDB collection connection with retry logic.
+    
+    Args:
+        collection: Collection name
+        retry: Whether to retry on failure
+        max_retries: Maximum number of retry attempts
+    
+    Returns:
+        MongoDB collection object
+    
+    Raises:
+        ConnectionFailure: If MongoDB is not available after retries
+    """
+    mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    
+    for attempt in range(max_retries):
+        try:
+            client = pymongo.MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=MONGO_CONNECTION_TIMEOUT * 1000
+            )
+            # Verify connection
+            client.admin.command('ping')
+            db = client["huruhuru"]
+            collection_obj = db[collection]
+            return collection_obj
+        except (ServerSelectionTimeoutError, ConnectionFailure, PyMongoError) as e:
+            if attempt < max_retries - 1 and retry:
+                wait_time = min(MONGO_RETRY_DELAY * (2 ** attempt), MONGO_MAX_RETRY_DELAY)
+                logging.warning(f"MongoDB connection failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logging.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                logging.error(f"Failed to connect to MongoDB after {max_retries} attempts: {e}")
+                raise
+        except Exception as e:
+            logging.error(f"Unexpected error connecting to MongoDB: {e}")
+            raise
 
 
 def convert_price_to_int(price_str):
@@ -111,7 +213,15 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
     for product in all_products:
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
-    mongo_col = get_mongo_conn(mongo_col_name)
+    
+    # Get MongoDB connection with retry logic
+    try:
+        mongo_col = get_mongo_conn(mongo_col_name, retry=True)
+    except (ServerSelectionTimeoutError, ConnectionFailure, PyMongoError) as e:
+        logging.error(f"MongoDB not available for {mongo_col_name}: {e}")
+        logging.info("Will retry on next scheduled run")
+        return "MONGODB_UNAVAILABLE"
+    
     link_set = set()
     all_new_item_text = "NEW PRODUCT IN STOCK! :"
     all_sold_item_text = "NO LONGER IN STOCK, SOLD!:"
@@ -166,6 +276,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
                 print(query_res.raw_result)
                 raise Exception("Mongo update failed: ", query_res.raw_result)
         logging.debug("$$$ Not in SET $$$")
+    
     logging.info(f"# New Listing/Back in Stock items: {count_new_items}")
     logging.info(f"# No Longer in Stock: {count_sold_items}")
     logging.info("Sending Telegram Messages")
@@ -178,38 +289,58 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
 
 # --------------------------------------------------------------------
 def track_gpu():
-    logging.info("Tracking GPU")
-    gpu_base_url = "https://gameloot.in/product-category/graphics-card"
-    mongo_col_name = "gameloot_gpu"
-    process_gameloot_stock(gpu_base_url, mongo_col_name)
+    try:
+        logging.info("Tracking GPU")
+        gpu_base_url = "https://gameloot.in/product-category/graphics-card"
+        mongo_col_name = "gameloot_gpu"
+        result = process_gameloot_stock(gpu_base_url, mongo_col_name)
+        if result == "MONGODB_UNAVAILABLE":
+            logging.warning("GPU tracking skipped due to MongoDB unavailability")
+    except Exception as e:
+        logging.error(f"Error in track_gpu: {e}", exc_info=True)
 
 
 def track_cpu():
-    logging.info("Tracking CPU")
-    cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
-    mongo_col_name = "gameloot_cpu"
-    process_gameloot_stock(cpu_base_url, mongo_col_name)
+    try:
+        logging.info("Tracking CPU")
+        cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
+        mongo_col_name = "gameloot_cpu"
+        result = process_gameloot_stock(cpu_base_url, mongo_col_name)
+        if result == "MONGODB_UNAVAILABLE":
+            logging.warning("CPU tracking skipped due to MongoDB unavailability")
+    except Exception as e:
+        logging.error(f"Error in track_cpu: {e}", exc_info=True)
 
 
 def track_mobo():
-    logging.info("Tracking Mobo")
-    motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
-    mongo_col_name = "gameloot_mobo"
-    process_gameloot_stock(motherboard_base_url, mongo_col_name)
+    try:
+        logging.info("Tracking Mobo")
+        motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
+        mongo_col_name = "gameloot_mobo"
+        result = process_gameloot_stock(motherboard_base_url, mongo_col_name)
+        if result == "MONGODB_UNAVAILABLE":
+            logging.warning("Mobo tracking skipped due to MongoDB unavailability")
+    except Exception as e:
+        logging.error(f"Error in track_mobo: {e}", exc_info=True)
 
 
 def track_ram():
-    logging.info("Tracking Mobo")
-    motherboard_base_url = "https://gameloot.in/product-category/desktop-ram/"
-    mongo_col_name = "gameloot_ram"
-    process_gameloot_stock(motherboard_base_url, mongo_col_name)
+    try:
+        logging.info("Tracking RAM")
+        motherboard_base_url = "https://gameloot.in/product-category/desktop-ram/"
+        mongo_col_name = "gameloot_ram"
+        result = process_gameloot_stock(motherboard_base_url, mongo_col_name)
+        if result == "MONGODB_UNAVAILABLE":
+            logging.warning("RAM tracking skipped due to MongoDB unavailability")
+    except Exception as e:
+        logging.error(f"Error in track_ram: {e}", exc_info=True)
 
 
 def task_scheduler():
     schedule.every(15).minutes.do(track_gpu)
     schedule.every(22).minutes.do(track_cpu)
     schedule.every(27).minutes.do(track_mobo)
-    #schedule.every(27).minutes.do(track_ram)
+    # schedule.every(27).minutes.do(track_ram)
     logging.info("Scheduler started with Jobs:")
     for jobs in schedule.get_jobs():
         print(jobs)
@@ -218,16 +349,10 @@ def task_scheduler():
         try:
             schedule.run_pending()
         except Exception as e:
-            print(e)
+            logging.error(f"Error in scheduler: {e}", exc_info=True)
         time.sleep(1)
 
 
-def run_in_loop():
-    while True:
-        process_gameloot_stock()
-        print("Sleeping for 15 min")
-        logging.debug("\n\n\n\n\n\n\n\n\n\n\n\n")
-        time.sleep(900)
 
 
 if __name__ == "__main__":

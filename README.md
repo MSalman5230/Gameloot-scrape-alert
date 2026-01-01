@@ -2,7 +2,7 @@
 
 A Python-based web scraping application that monitors [Gameloot.in](https://gameloot.in) for PC component stock changes and sends real-time Telegram notifications when products become available or go out of stock.
 
-## �� Features
+## Features
 
 - **Real-time Monitoring**: Continuously tracks stock changes for PC components
 - **Multi-Component Support**: Monitors GPUs, CPUs, motherboards, and RAM
@@ -45,16 +45,41 @@ A Python-based web scraping application that monitors [Gameloot.in](https://game
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
    LOG_FORMAT=%(levelname)s - %(message)s
    LOG_LEVEL=INFO
+   MONGODB_URI=mongodb://username:password@host:port/?authMechanism=DEFAULT&authSource=database
    ```
 
-4. **Configure MongoDB connection**
-   Update the MongoDB connection string in `scraper.py`:
-   ```python
-   client = pymongo.MongoClient("mongodb://username:password@host:port/?authMechanism=DEFAULT&authSource=database")
-   ```
-
-5. **Configure Telegram chat IDs**
+4. **Configure Telegram chat IDs**
    Update the `CHAT_IDS` list in `telegram_helper.py` with your chat IDs.
+
+## 🔧 Environment Variables
+
+The application uses the following environment variables (defined in `.env` file):
+
+| Variable | Description | Required | Default | Example |
+|----------|-------------|----------|---------|---------|
+| `TELEGRAM_BOT_TOKEN` | Your Telegram bot API token | ✅ Yes | - | `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz` |
+| `MONGODB_URI` | MongoDB connection string | ✅ Yes | `mongodb://localhost:27017` | `mongodb://user:pass@host:port/?authSource=db` |
+| `LOG_FORMAT` | Logging format string | ❌ No | `%(levelname)s - %(message)s` | `%(asctime)s - %(levelname)s - %(message)s` |
+| `LOG_LEVEL` | Logging level | ❌ No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+### Environment Variables Setup
+
+1. **Create `.env` file** in the project root directory
+2. **Add your configuration** following the examples above
+3. **Never commit** the `.env` file to version control (add it to `.gitignore`)
+
+Example `.env` file:
+```env
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN=your_actual_bot_token_here
+
+# MongoDB Configuration
+MONGODB_URI=mongodb://username:password@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru
+
+# Logging Configuration
+LOG_FORMAT=%(asctime)s - %(levelname)s - %(message)s
+LOG_LEVEL=INFO
+```
 
 ## ⚙️ Configuration
 
@@ -62,13 +87,14 @@ A Python-based web scraping application that monitors [Gameloot.in](https://game
 - Ensure MongoDB is running and accessible
 - Create appropriate collections for each component type
 - Verify authentication credentials
+- Update the `MONGODB_URI` in your `.env` file
 
 ### Telegram Bot Setup
 1. Create a bot via [@BotFather](https://t.me/botfather)
 2. Get your bot token
-3. Add the token to your `.env` file
+3. Add the token to your `.env` file as `TELEGRAM_BOT_TOKEN`
 4. Start a chat with your bot and get your chat ID
-5. Add your chat ID to the `CHAT_IDS` list
+5. Add your chat ID to the `CHAT_IDS` list in `telegram_helper.py`
 
 ### Scraping Intervals
 Modify the scheduling in `scraper.py`:
@@ -114,10 +140,11 @@ Gameloot-scrape-alert/
 ├── logging_config.py       # Logging configuration
 ├── dict_list_search.py     # Utility script for performance testing
 ├── reqs.txt               # Python dependencies
+├── .env                   # Environment variables (create this)
 └── README.md              # This file
 ```
 
-##  Key Functions
+## Key Functions
 
 - `scrape_product_page()`: Scrapes individual product pages
 - `scrape_all_products()`: Iterates through all pages of a category
@@ -139,6 +166,7 @@ The application provides comprehensive logging with configurable levels:
 - **MongoDB Security**: Use strong authentication for production MongoDB instances
 - **Telegram Limits**: Messages are automatically split if they exceed 4096 characters
 - **Error Handling**: The application includes retry mechanisms for Telegram message sending
+- **Environment Security**: Never commit `.env` files to version control
 
 ## 🤝 Contributing
 
@@ -158,12 +186,13 @@ This project is for educational and personal use. Please respect Gameloot.in's t
 
 1. **MongoDB Connection Failed**
    - Verify MongoDB is running
-   - Check connection string and credentials
+   - Check `MONGODB_URI` in your `.env` file
+   - Verify connection string and credentials
    - Ensure network connectivity
 
 2. **Telegram Messages Not Sending**
-   - Verify bot token is correct
-   - Check chat IDs are valid
+   - Verify `TELEGRAM_BOT_TOKEN` is correct in `.env`
+   - Check chat IDs are valid in `telegram_helper.py`
    - Ensure bot has permission to send messages
 
 3. **Scraping Fails**
@@ -171,11 +200,17 @@ This project is for educational and personal use. Please respect Gameloot.in's t
    - Verify Gameloot.in is accessible
    - Review logging for specific error messages
 
+4. **Environment Variables Not Loading**
+   - Ensure `.env` file exists in project root
+   - Check variable names match exactly (case-sensitive)
+   - Restart the application after changing `.env`
+
 ### Getting Help
 
 - Check the logs for detailed error information
-- Verify all environment variables are set correctly
+- Verify all environment variables are set correctly in `.env`
 - Ensure all dependencies are installed properly
+- Check that `.env` file is in the correct location
 
 ## 🔮 Future Enhancements
 
