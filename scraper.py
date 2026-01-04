@@ -36,7 +36,7 @@ def task_scheduler():
 
 
 if __name__ == "__main__":
-    #task_scheduler()
+    task_scheduler()
     # process_gameloot_stock()
     #track_cpu()
     #track_mobo()
