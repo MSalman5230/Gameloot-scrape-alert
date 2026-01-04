@@ -14,10 +14,10 @@ load_dotenv()
 def task_scheduler():
     """Main task scheduler that orchestrates all scraping tasks."""
     # Gameloot tasks
-    schedule.every(1).minutes.do(track_gpu)
-    schedule.every(1).minutes.do(track_cpu)
-    schedule.every(1).minutes.do(track_mobo)
-    schedule.every(1).minutes.do(track_ram)
+    schedule.every(15).minutes.do(track_gpu)
+    schedule.every(18).minutes.do(track_cpu)
+    schedule.every(22).minutes.do(track_mobo)
+    schedule.every(30).minutes.do(track_ram)
 
     # CEX tasks (uncomment when implemented)
     # schedule.every(20).minutes.do(track_cex_gpu)
