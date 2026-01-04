@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r reqs.txt
 
 # Copy application files
 COPY scraper.py .
+COPY gameloot.py .
+COPY cex.py .
+COPY db_utils.py .
 COPY telegram_helper.py .
 COPY logging_config.py .
 COPY dict_list_search.py .
