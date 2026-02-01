@@ -3,11 +3,22 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMon
 import time
 import logging
 import os
+from urllib.parse import urlparse, unquote
 
 # MongoDB connection settings
 MONGO_CONNECTION_TIMEOUT = 5  # seconds
 MONGO_RETRY_DELAY = 5  # seconds between retries
 MONGO_MAX_RETRY_DELAY = 60  # maximum delay between retries
+MONGO_DEFAULT_DB = "gamelootScrape"  # used when db is not specified in URI
+
+
+def _db_name_from_uri(uri):
+    """Extract database name from MongoDB URI, or return default if not specified."""
+    parsed = urlparse(uri)
+    path = (parsed.path or "").strip("/")
+    if path and path != "?":
+        return unquote(path)
+    return MONGO_DEFAULT_DB
 
 
 def check_mongodb_available(mongo_uri=None, timeout=MONGO_CONNECTION_TIMEOUT):
@@ -86,7 +97,8 @@ def get_mongo_conn(collection, retry=True, max_retries=3):
             client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=MONGO_CONNECTION_TIMEOUT * 1000)
             # Verify connection
             client.admin.command("ping")
-            db = client["huruhuru"]
+            db_name = _db_name_from_uri(mongo_uri)
+            db = client[db_name]
             collection_obj = db[collection]
             return collection_obj
         except (ServerSelectionTimeoutError, ConnectionFailure, PyMongoError) as e:

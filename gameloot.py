@@ -147,8 +147,10 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
         query = {"link": product["link"], "type": product_type}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
+        now = datetime.utcnow()
+
         if result:
-            if result["inStock"] == False:  # Product which were our of stock in db
+            if result["inStock"] == False:  # Product which were out of stock in db
                 logging.debug(f"RESULT: {result}")
                 logging.info(f"Back in Stock: {product['name']}, {product['price']}, {product['link']}")
                 new_item = f"\n\n-{product['name']} - {product['price']} - {product['link']}"
@@ -161,8 +163,27 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
             all_new_item_text = all_new_item_text + new_item
             count_new_items += 1
 
-        # print("Inserting to Mongo")
-        update = {"$set": product}
+        # Build update: always set product fields and priceUpdatedAt
+        set_doc = {**product, "priceUpdatedAt": now}
+        update = {"$set": set_doc}
+
+        if result is None:
+            # New product: set firstSeenAt and initial priceHistory entry
+            set_doc["firstSeenAt"] = now
+            set_doc["priceHistory"] = [{"price": product["price"], "at": now, "inStock": True}]
+        else:
+            # Push to priceHistory only when price changed or product was OOS (restock)
+            price_changed = result.get("price") != product["price"]
+            was_out_of_stock = result.get("inStock") is False
+            if price_changed or was_out_of_stock:
+                update["$push"] = {
+                    "priceHistory": {
+                        "price": product["price"],
+                        "at": now,
+                        "inStock": True,
+                    }
+                }
+
         query_res = mongo_col.update_one(query, update, upsert=True)
         if not query_res.raw_result["ok"]:
             print(query_res.raw_result)
@@ -182,7 +203,17 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
             sold_item = f"\n\n-{db_product['name']} - {db_product['price']} - {db_product['link']}"
             all_sold_item_text = all_sold_item_text + sold_item
             count_sold_items += 1
-            update = {"$set": {"inStock": False}}
+            now = datetime.utcnow()
+            update = {
+                "$set": {"inStock": False},
+                "$push": {
+                    "priceHistory": {
+                        "price": db_product["price"],
+                        "at": now,
+                        "inStock": False,
+                    }
+                },
+            }
             query = {"link": db_product["link"], "type": product_type}
             query_res = mongo_col.update_one(query, update, upsert=True)
             if not query_res.raw_result["ok"]:
