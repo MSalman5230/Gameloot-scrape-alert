@@ -105,8 +105,13 @@ def scrape_all_products(base_url):
     return all_products
 
 
-def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphics-card", mongo_col_name="gameloot_gpu"):
-    """Process Gameloot stock updates and send notifications for new/back in stock items."""
+# Single collection for all Gameloot product types (gpu, cpu, mobo, ram)
+GAMELOOT_COLLECTION = "gameloot_products"
+
+
+def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphics-card", product_type="gpu"):
+    """Process Gameloot stock updates and send notifications for new/back in stock items.
+    Uses a single collection with a 'type' field (gpu, cpu, mobo, ram)."""
     logging.info(f"Started at: {datetime.now()}")
     all_products = scrape_all_products(base_url)
     if all_products == "SCRAPE_FAILED":
@@ -114,16 +119,19 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
         return "SCRAPE_FAILED"
 
     all_products = remove_list_duplicates(all_products)
+    # Add type to each product for single-collection storage
+    for product in all_products:
+        product["type"] = product_type
     # Print the extracted product details
     for product in all_products:
         logging.debug(f"Product Name: {product['name']}, Price: {product['price']}, Link: {product['link']}")
     logging.info(f"Total Products: {len(all_products)}")
 
-    # Get MongoDB connection with retry logic
+    # Get MongoDB connection with retry logic (single collection)
     try:
-        mongo_col = get_mongo_conn(mongo_col_name, retry=True)
+        mongo_col = get_mongo_conn(GAMELOOT_COLLECTION, retry=True)
     except (ServerSelectionTimeoutError, ConnectionFailure, PyMongoError) as e:
-        logging.error(f"MongoDB not available for {mongo_col_name}: {e}")
+        logging.error(f"MongoDB not available for {GAMELOOT_COLLECTION}: {e}")
         logging.info("Will retry on next scheduled run")
         return "MONGODB_UNAVAILABLE"
 
@@ -136,7 +144,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
     for product in all_products:
         logging.debug("*************")
         logging.debug(product)
-        query = {"link": product["link"]}
+        query = {"link": product["link"], "type": product_type}
         link_set.add(product["link"])
         result = mongo_col.find_one(query)
         if result:
@@ -161,7 +169,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
             raise Exception("Mongo update failed: ", query_res.raw_result)
 
     logging.info("Finding Sold Items")
-    result = mongo_col.find()
+    result = mongo_col.find({"type": product_type})
     for db_product in result:
         logging.debug("------------------")
         logging.debug(db_product)
@@ -175,7 +183,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
             all_sold_item_text = all_sold_item_text + sold_item
             count_sold_items += 1
             update = {"$set": {"inStock": False}}
-            query = {"link": db_product["link"]}
+            query = {"link": db_product["link"], "type": product_type}
             query_res = mongo_col.update_one(query, update, upsert=True)
             if not query_res.raw_result["ok"]:
                 print(query_res.raw_result)
@@ -197,8 +205,7 @@ def track_gpu():
     try:
         logging.info("Tracking GPU")
         gpu_base_url = "https://gameloot.in/product-category/graphics-card"
-        mongo_col_name = "gameloot_gpu"
-        result = process_gameloot_stock(gpu_base_url, mongo_col_name)
+        result = process_gameloot_stock(gpu_base_url, product_type="gpu")
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("GPU tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
@@ -212,8 +219,7 @@ def track_cpu():
     try:
         logging.info("Tracking CPU")
         cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
-        mongo_col_name = "gameloot_cpu"
-        result = process_gameloot_stock(cpu_base_url, mongo_col_name)
+        result = process_gameloot_stock(cpu_base_url, product_type="cpu")
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("CPU tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
@@ -227,8 +233,7 @@ def track_mobo():
     try:
         logging.info("Tracking Mobo")
         motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
-        mongo_col_name = "gameloot_mobo"
-        result = process_gameloot_stock(motherboard_base_url, mongo_col_name)
+        result = process_gameloot_stock(motherboard_base_url, product_type="mobo")
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("Mobo tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
@@ -241,9 +246,8 @@ def track_ram():
     """Track Gameloot RAM stock."""
     try:
         logging.info("Tracking RAM")
-        motherboard_base_url = "https://gameloot.in/product-category/desktop-ram/"
-        mongo_col_name = "gameloot_ram"
-        result = process_gameloot_stock(motherboard_base_url, mongo_col_name)
+        ram_base_url = "https://gameloot.in/product-category/desktop-ram/"
+        result = process_gameloot_stock(ram_base_url, product_type="ram")
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("RAM tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
