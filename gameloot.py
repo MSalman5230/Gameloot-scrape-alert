@@ -1,4 +1,5 @@
 import requests
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMongoError
 import asyncio
@@ -6,6 +7,37 @@ import logging
 from datetime import datetime
 from telegram_helper import send_telegram_message
 from db_utils import get_mongo_conn, remove_list_duplicates
+
+# Plain requests uses python-requests/* as User-Agent; many sites return 403. Mimic a current desktop browser.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+}
+
+_gameloot_http = requests.Session()
+_gameloot_http.headers.update(_BROWSER_HEADERS)
+_REQUEST_TIMEOUT = (10, 30)
+
+
+def _listing_page_url(base_url: str, page_number: int) -> str:
+    """Build paginated listing URL without double slashes when base_url has a trailing slash."""
+    base = base_url.rstrip("/")
+    return f"{base}/page/{page_number}/?stock=instock"
 
 
 def convert_price_to_int(price_str):
@@ -33,7 +65,13 @@ def scrape_product_page(url):
         None: If page 404 (end of pagination)
         "SCRAPE_FAILED": If non-200/404 error occurred
     """
-    response = requests.get(url)
+    parsed = urlparse(url)
+    referer = f"{parsed.scheme}://{parsed.netloc}/"
+    response = _gameloot_http.get(
+        url,
+        timeout=_REQUEST_TIMEOUT,
+        headers={"Referer": referer},
+    )
 
     # 404 means end of pagination - this is expected
     if response.status_code == 404:
@@ -81,7 +119,7 @@ def scrape_all_products(base_url):
     page_number = 1
     while True:
         logging.info(f"Scraping page: {page_number}")
-        url = f"{base_url}/page/{page_number}/?stock=instock"
+        url = _listing_page_url(base_url, page_number)
         products = scrape_product_page(url)
 
         # Check for scrape failure - abort immediately
