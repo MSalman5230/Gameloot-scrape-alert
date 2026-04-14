@@ -5,8 +5,17 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMon
 import asyncio
 import logging
 from datetime import datetime
+from enum import Enum
+from typing import Optional
+
 from telegram_helper import send_telegram_message
 from db_utils import get_mongo_conn, remove_list_duplicates
+
+
+class ScrapeResult(Enum):
+    """Enum for scrape operation results."""
+    SCRAPE_FAILED = "SCRAPE_FAILED"
+    MONGODB_UNAVAILABLE = "MONGODB_UNAVAILABLE"
 
 # Plain requests uses python-requests/* as User-Agent; many sites return 403. Mimic a current desktop browser.
 _BROWSER_HEADERS = {
@@ -35,20 +44,42 @@ _REQUEST_TIMEOUT = (10, 30)
 
 
 def _listing_page_url(base_url: str, page_number: int) -> str:
-    """Build paginated listing URL without double slashes when base_url has a trailing slash."""
+    """Build paginated listing URL without double slashes when base_url has a trailing slash.
+
+    Args:
+        base_url: Base URL of the Gameloot product category.
+        page_number: Page number to generate URL for.
+
+    Returns:
+        Complete URL for the specified page.
+    """
     base = base_url.rstrip("/")
     return f"{base}/page/{page_number}/?stock=instock"
 
 
-def convert_price_to_int(price_str):
-    """Convert Gameloot price string to integer."""
+def convert_price_to_int(price_str: str) -> int:
+    """Convert Gameloot price string to integer.
+
+    Args:
+        price_str: Price string from website (e.g., "Rs. 45,000").
+
+    Returns:
+        Price as integer.
+    """
     # Replace non-breaking space character with regular space, remove "Rs." and commas, then convert to integer
     price_str = price_str.replace("\xa0", " ").replace("Rs. ", "").replace(",", "")
     return int(price_str)
 
 
-def clean_product_name(name):
-    """Clean Gameloot product name by removing content in parentheses."""
+def clean_product_name(name: str) -> str:
+    """Clean Gameloot product name by removing content in parentheses.
+
+    Args:
+        name: Raw product name from website.
+
+    Returns:
+        Cleaned product name.
+    """
     # Find the last position of the last occurrence of '('
     pos = name.rfind("(")
     # If a '(' is found, return the substring before it, else return the original name
@@ -57,13 +88,15 @@ def clean_product_name(name):
     return name.strip()
 
 
-def scrape_product_page(url):
+def scrape_product_page(url: str) -> Optional[list]:
     """Scrape a single Gameloot product page.
 
+    Args:
+        url: URL of the product page to scrape.
+
     Returns:
-        list: List of product dictionaries if successful
-        None: If page 404 (end of pagination)
-        "SCRAPE_FAILED": If non-200/404 error occurred
+        List of product dictionaries if successful, None if page 404 (end of pagination),
+        or ScrapeResult.SCRAPE_FAILED if non-200/404 error occurred.
     """
     parsed = urlparse(url)
     referer = f"{parsed.scheme}://{parsed.netloc}/"
@@ -108,12 +141,15 @@ def scrape_product_page(url):
     return products
 
 
-def scrape_all_products(base_url):
+def scrape_all_products(base_url: str) -> Optional[list]:
     """Scrape all products from Gameloot by paginating through pages.
 
+    Args:
+        base_url: Base URL of the Gameloot product category.
+
     Returns:
-        list: List of all product dictionaries if successful
-        "SCRAPE_FAILED": If any page returned a non-200/404 error
+        List of all product dictionaries if successful, or ScrapeResult.SCRAPE_FAILED
+        if any page returned a non-200/404 error.
     """
     all_products = []
     page_number = 1
@@ -123,9 +159,9 @@ def scrape_all_products(base_url):
         products = scrape_product_page(url)
 
         # Check for scrape failure - abort immediately
-        if products == "SCRAPE_FAILED":
+        if products == ScrapeResult.SCRAPE_FAILED.value:
             logging.error(f"Scraping failed on page {page_number}. Aborting entire scrape run.")
-            return "SCRAPE_FAILED"
+            return ScrapeResult.SCRAPE_FAILED.value
 
         # None means 404 - end of pagination (expected)
         if products is None:
@@ -147,14 +183,22 @@ def scrape_all_products(base_url):
 GAMELOOT_COLLECTION = "gameloot_products"
 
 
-def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphics-card", product_type="gpu"):
+def process_gameloot_stock(base_url: str = "https://gameloot.in/product-category/graphics-card", product_type: str = "gpu") -> Optional[str]:
     """Process Gameloot stock updates and send notifications for new/back in stock items.
-    Uses a single collection with a 'type' field (gpu, cpu, mobo, ram)."""
+    Uses a single collection with a 'type' field (gpu, cpu, mobo, ram).
+
+    Args:
+        base_url: URL of the Gameloot product category to scrape.
+        product_type: Type of product being tracked (gpu, cpu, mobo, ram).
+
+    Returns:
+        ScrapeResult value or None on success.
+    """
     logging.info(f"Started at: {datetime.now()}")
     all_products = scrape_all_products(base_url)
-    if all_products == "SCRAPE_FAILED":
+    if all_products == ScrapeResult.SCRAPE_FAILED.value:
         logging.warning("Scraping failed with non-200 response. Aborting to prevent false 'sold' notifications. Will retry on next scheduled run.")
-        return "SCRAPE_FAILED"
+        return ScrapeResult.SCRAPE_FAILED.value
 
     all_products = remove_list_duplicates(all_products)
     # Add type to each product for single-collection storage
@@ -171,7 +215,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
     except (ServerSelectionTimeoutError, ConnectionFailure, PyMongoError) as e:
         logging.error(f"MongoDB not available for {GAMELOOT_COLLECTION}: {e}")
         logging.info("Will retry on next scheduled run")
-        return "MONGODB_UNAVAILABLE"
+        return ScrapeResult.MONGODB_UNAVAILABLE.value
 
     link_set = set()
     all_new_item_text = "NEW PRODUCT IN STOCK! :"
@@ -269,57 +313,57 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
     logging.info("Completed")
 
 
-def track_gpu():
+# Product type configuration
+_PRODUCT_CONFIG = {
+    "gpu": "https://gameloot.in/product-category/graphics-card",
+    "cpu": "https://gameloot.in/product-category/buy-cpu/",
+    "mobo": "https://gameloot.in/product-category/motherboard/",
+    "ram": "https://gameloot.in/product-category/desktop-ram/",
+}
+
+
+def _track_product(product_type: str) -> Optional[str]:
+    """Track Gameloot stock for a specific product type.
+
+    Args:
+        product_type: Type of product to track (gpu, cpu, mobo, ram).
+
+    Returns:
+        ScrapeResult value if tracking was skipped, None otherwise.
+    """
+    base_url = _PRODUCT_CONFIG.get(product_type)
+    if not base_url:
+        logging.error(f"Unknown product type: {product_type}")
+        return ScrapeResult.SCRAPE_FAILED.value
+
+    try:
+        logging.info(f"Tracking {product_type.upper()}")
+        result = process_gameloot_stock(base_url, product_type=product_type)
+        if result == ScrapeResult.MONGODB_UNAVAILABLE.value:
+            logging.warning(f"{product_type.upper()} tracking skipped due to MongoDB unavailability")
+        elif result == ScrapeResult.SCRAPE_FAILED.value:
+            logging.warning(f"{product_type.upper()} tracking skipped due to scraping failure (non-200 response)")
+        return result
+    except Exception as e:
+        logging.error(f"Error in track_{product_type}: {e}", exc_info=True)
+        return ScrapeResult.SCRAPE_FAILED.value
+
+
+def track_gpu() -> Optional[str]:
     """Track Gameloot GPU stock."""
-    try:
-        logging.info("Tracking GPU")
-        gpu_base_url = "https://gameloot.in/product-category/graphics-card"
-        result = process_gameloot_stock(gpu_base_url, product_type="gpu")
-        if result == "MONGODB_UNAVAILABLE":
-            logging.warning("GPU tracking skipped due to MongoDB unavailability")
-        elif result == "SCRAPE_FAILED":
-            logging.warning("GPU tracking skipped due to scraping failure (non-200 response)")
-    except Exception as e:
-        logging.error(f"Error in track_gpu: {e}", exc_info=True)
+    return _track_product("gpu")
 
 
-def track_cpu():
+def track_cpu() -> Optional[str]:
     """Track Gameloot CPU stock."""
-    try:
-        logging.info("Tracking CPU")
-        cpu_base_url = "https://gameloot.in/product-category/buy-cpu/"
-        result = process_gameloot_stock(cpu_base_url, product_type="cpu")
-        if result == "MONGODB_UNAVAILABLE":
-            logging.warning("CPU tracking skipped due to MongoDB unavailability")
-        elif result == "SCRAPE_FAILED":
-            logging.warning("CPU tracking skipped due to scraping failure (non-200 response)")
-    except Exception as e:
-        logging.error(f"Error in track_cpu: {e}", exc_info=True)
+    return _track_product("cpu")
 
 
-def track_mobo():
+def track_mobo() -> Optional[str]:
     """Track Gameloot Motherboard stock."""
-    try:
-        logging.info("Tracking Mobo")
-        motherboard_base_url = "https://gameloot.in/product-category/motherboard/"
-        result = process_gameloot_stock(motherboard_base_url, product_type="mobo")
-        if result == "MONGODB_UNAVAILABLE":
-            logging.warning("Mobo tracking skipped due to MongoDB unavailability")
-        elif result == "SCRAPE_FAILED":
-            logging.warning("Mobo tracking skipped due to scraping failure (non-200 response)")
-    except Exception as e:
-        logging.error(f"Error in track_mobo: {e}", exc_info=True)
+    return _track_product("mobo")
 
 
-def track_ram():
+def track_ram() -> Optional[str]:
     """Track Gameloot RAM stock."""
-    try:
-        logging.info("Tracking RAM")
-        ram_base_url = "https://gameloot.in/product-category/desktop-ram/"
-        result = process_gameloot_stock(ram_base_url, product_type="ram")
-        if result == "MONGODB_UNAVAILABLE":
-            logging.warning("RAM tracking skipped due to MongoDB unavailability")
-        elif result == "SCRAPE_FAILED":
-            logging.warning("RAM tracking skipped due to scraping failure (non-200 response)")
-    except Exception as e:
-        logging.error(f"Error in track_ram: {e}", exc_info=True)
+    return _track_product("ram")
