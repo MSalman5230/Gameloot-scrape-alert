@@ -1,9 +1,11 @@
 import pymongo
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMongoError
+from pymongo.collection import Collection
 import time
 import logging
 import os
 from urllib.parse import urlparse, unquote
+from typing import Optional, List, Dict, Any
 
 # MongoDB connection settings
 MONGO_CONNECTION_TIMEOUT = 5  # seconds
@@ -12,7 +14,7 @@ MONGO_MAX_RETRY_DELAY = 60  # maximum delay between retries
 MONGO_DEFAULT_DB = "gamelootScrape"  # used when db is not specified in URI
 
 
-def _db_name_from_uri(uri):
+def _db_name_from_uri(uri: str) -> str:
     """Extract database name from MongoDB URI, or return default if not specified."""
     parsed = urlparse(uri)
     path = (parsed.path or "").strip("/")
@@ -21,10 +23,15 @@ def _db_name_from_uri(uri):
     return MONGO_DEFAULT_DB
 
 
-def check_mongodb_available(mongo_uri=None, timeout=MONGO_CONNECTION_TIMEOUT):
-    """
-    Check if MongoDB is available and accessible.
-    Returns True if available, False otherwise.
+def check_mongodb_available(mongo_uri: Optional[str] = None, timeout: int = MONGO_CONNECTION_TIMEOUT) -> bool:
+    """Check if MongoDB is available and accessible.
+
+    Args:
+        mongo_uri: MongoDB connection URI (defaults to MONGODB_URI env var).
+        timeout: Connection timeout in seconds.
+
+    Returns:
+        True if available, False otherwise.
     """
     try:
         if mongo_uri is None:
@@ -115,19 +122,31 @@ def get_mongo_conn(collection, retry=True, max_retries=3):
             raise
 
 
-def remove_list_duplicates(dict_list):
-    """Remove duplicate dictionaries from a list."""
-    logging.info("removing product duplicate")
-    logging.info(f"Original list length: {len(dict_list)}")
-    for i in dict_list:
-        logging.debug(i)
-    # Convert each dictionary to a tuple of sorted items
-    tuple_list = [tuple(sorted(d.items())) for d in dict_list]
+def remove_list_duplicates(dict_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove duplicate dictionaries from a list.
 
-    # Remove duplicates by converting the list of tuples to a set
-    unique_tuples = set(tuple_list)
+    Uses a more efficient approach by tracking seen combinations.
 
-    # Convert the tuples back to dictionaries
-    unique_dict_list = [dict(t) for t in unique_tuples]
-    logging.info(f"Deduplicate list length: {len(unique_dict_list)}")
+    Args:
+        dict_list: List of dictionaries to deduplicate.
+
+    Returns:
+        List of unique dictionaries preserving order.
+    """
+    logging.info("Removing product duplicates")
+    logging.info("Original list length: %d", len(dict_list))
+    for item in dict_list:
+        logging.debug("%s", item)
+
+    # Use dict.fromkeys to preserve order while removing duplicates
+    # Convert to frozenset of items for hashability
+    seen = set()
+    unique_dict_list = []
+    for d in dict_list:
+        key = frozenset(d.items())
+        if key not in seen:
+            seen.add(key)
+            unique_dict_list.append(d)
+
+    logging.info("Deduplicated list length: %d", len(unique_dict_list))
     return unique_dict_list
