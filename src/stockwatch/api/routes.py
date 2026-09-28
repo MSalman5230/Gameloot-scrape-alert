@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from stockwatch.core.engine import AlreadyActive, Engine, NotCancellable
 from stockwatch.models import Category, RunRecord, RunStatus, RuntimeSettings, Trigger, utcnow
-from stockwatch.storage import Store
 
 router = APIRouter(prefix="/api")
 
@@ -18,10 +17,6 @@ def get_engine(request: Request) -> Engine:
 
 
 EngineDep = Annotated[Engine, Depends(get_engine)]
-
-
-def _store(engine: Engine) -> Store:
-    return engine.store
 
 
 class SettingsPatch(BaseModel):
@@ -44,7 +39,7 @@ def _category_view(engine: Engine, cat: Category) -> dict[str, Any]:
 
 @router.get("/health")
 async def health(engine: EngineDep):
-    ok = await _store(engine).ping()
+    ok = await engine.store.ping()
     return JSONResponse({"ok": ok}, status_code=200 if ok else 503)
 
 
@@ -65,7 +60,7 @@ async def patch_settings(patch: SettingsPatch, engine: EngineDep) -> RuntimeSett
 
 @router.get("/sites")
 async def list_sites(engine: EngineDep) -> list[dict[str, Any]]:
-    categories = await _store(engine).list_categories()
+    categories = await engine.store.list_categories()
     return [
         {
             "key": adapter.key,
@@ -116,7 +111,7 @@ async def list_runs(
     run_status: Annotated[RunStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> list[RunRecord]:
-    return await _store(engine).list_runs(site=site, category_id=category_id, status=run_status, limit=limit)
+    return await engine.store.list_runs(site=site, category_id=category_id, status=run_status, limit=limit)
 
 
 @router.get("/products")
@@ -130,7 +125,7 @@ async def list_products(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    items, total = await _store(engine).list_products(
+    items, total = await engine.store.list_products(
         site=site,
         category=category,
         in_stock=in_stock,

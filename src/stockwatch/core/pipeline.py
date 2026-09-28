@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from stockwatch.core.diff import compute_changes
 from stockwatch.models import Category, utcnow
 from stockwatch.notify import Notifier, format_alerts
-from stockwatch.sites.base import Progress, SiteAdapter, SiteHttp
+from stockwatch.sites.base import Progress, ScrapeError, SiteAdapter, SiteHttp
 from stockwatch.storage import Store
 
 log = logging.getLogger(__name__)
@@ -37,6 +37,9 @@ async def run_category(
 
     progress.phase = "saving"
     known = await store.load_products(category.site, category.key)
+    if not items and any(p.in_stock for p in known.values()):
+        # A shop glitch showing "no products" would otherwise mark the whole category sold at once.
+        raise ScrapeError(f"Empty listing at {category.url} while products are in stock; not trusting it")
     changes = compute_changes(known, items)
     await store.apply_changes(category.site, category.key, changes, utcnow())
 

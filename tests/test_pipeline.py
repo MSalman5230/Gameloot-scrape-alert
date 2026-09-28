@@ -118,6 +118,26 @@ async def test_failed_scrape_writes_nothing_and_alerts_nobody(site, category):
     assert notifier.messages == []
 
 
+async def test_empty_listing_is_rejected_while_products_are_in_stock(site, category):
+    store, notifier = MemoryStore(), RecordingNotifier()
+    site.listings[URL] = [item(1), item(2)]
+    await run(site, store, notifier, category)
+    before = {k: dict(v) for k, v in store.products.items()}
+
+    site.listings[URL] = []
+    with pytest.raises(ScrapeError, match="Empty listing"):
+        await run(site, store, notifier, category)
+    assert {k: dict(v) for k, v in store.products.items()} == before
+    assert notifier.messages == []
+
+
+async def test_empty_listing_is_fine_when_nothing_is_in_stock(site, category):
+    store, notifier = MemoryStore(), RecordingNotifier()
+    site.listings[URL] = []
+    result = await run(site, store, notifier, category)
+    assert (result.items, result.baseline) == (0, True)
+
+
 async def test_notification_failure_keeps_the_data(site, category):
     store = MemoryStore()
     site.listings[URL] = [item(1)]
