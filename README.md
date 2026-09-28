@@ -117,9 +117,17 @@ This will start the automated scheduler that continuously monitors all configure
 
 ### Manual scraping (for testing)
 ```bash
-python scraper.py
-# Uncomment the desired function calls at the bottom of the file
+python -c "from gameloot import scrape_all_products; print(scrape_all_products('https://gameloot.in/product-category/graphics-card'))"
 ```
+
+This fetches live listings without updating MongoDB or sending Telegram messages.
+
+### Regression tests
+```bash
+python -m unittest discover -s tests -v
+```
+
+These tests use mocked HTTP responses and do not contact external services.
 
 ## 📊 How It Works
 

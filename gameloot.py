@@ -1,4 +1,6 @@
 import requests
+import re
+from decimal import Decimal
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure, PyMongoError
@@ -41,10 +43,12 @@ def _listing_page_url(base_url: str, page_number: int) -> str:
 
 
 def convert_price_to_int(price_str):
-    """Convert Gameloot price string to integer."""
-    # Replace non-breaking space character with regular space, remove "Rs." and commas, then convert to integer
-    price_str = price_str.replace("\xa0", " ").replace("Rs. ", "").replace(",", "")
-    return int(price_str)
+    """Parse whole-rupee prices, with or without a space after the currency."""
+    normalized = price_str.replace("\xa0", " ").replace(",", "").strip()
+    match = re.fullmatch(r"(?:Rs\.?|INR|₹)?\s*([0-9]+(?:\.0+)?)", normalized)
+    if not match:
+        raise ValueError(f"Unrecognized whole-rupee price: {price_str!r}")
+    return int(Decimal(match.group(1)))
 
 
 def clean_product_name(name):
@@ -63,15 +67,19 @@ def scrape_product_page(url):
     Returns:
         list: List of product dictionaries if successful
         None: If page 404 (end of pagination)
-        "SCRAPE_FAILED": If non-200/404 error occurred
+        "SCRAPE_FAILED": If the request or product parsing failed
     """
     parsed = urlparse(url)
     referer = f"{parsed.scheme}://{parsed.netloc}/"
-    response = _gameloot_http.get(
-        url,
-        timeout=_REQUEST_TIMEOUT,
-        headers={"Referer": referer},
-    )
+    try:
+        response = _gameloot_http.get(
+            url,
+            timeout=_REQUEST_TIMEOUT,
+            headers={"Referer": referer},
+        )
+    except requests.RequestException as exc:
+        logging.error("Request failed for URL %s: %s", url, exc)
+        return "SCRAPE_FAILED"
 
     # 404 means end of pagination - this is expected
     if response.status_code == 404:
@@ -85,23 +93,37 @@ def scrape_product_page(url):
     webpage_content = response.content
     soup = BeautifulSoup(webpage_content, "html.parser")
     product_containers = soup.find_all("div", class_="kad_product")
+    if not product_containers:
+        empty_notice = any(
+            "No products were found matching your selection" in notice.get_text(" ", strip=True)
+            for notice in soup.select(".woocommerce-info")
+        )
+        if not empty_notice:
+            logging.error("Unrecognized product listing for URL: %s", url)
+            return "SCRAPE_FAILED"
 
     products = []
     for container in product_containers:
         name_tag = container.find("h5")
-        name = name_tag.text.strip() if name_tag else "No name found"
-        logging.debug(name)
         price_tag = container.find("ins")
         if price_tag:
-            price = price_tag.find("span", class_="woocommerce-Price-amount").text.strip()
+            price_tag = price_tag.find("span", class_="woocommerce-Price-amount")
         else:
             price_tag = container.find("span", class_="woocommerce-Price-amount")
-            price = price_tag.text.strip() if price_tag else "No price found"
 
         link_tag = container.find("a", class_="product_item_link")
-        href = link_tag["href"] if link_tag else "No link found"
-        name = clean_product_name(name)
-        price = convert_price_to_int(price)
+        if (not name_tag or not name_tag.get_text(strip=True) or not price_tag
+                or not link_tag or not link_tag.get("href")):
+            logging.error("Incomplete product listing for URL: %s", url)
+            return "SCRAPE_FAILED"
+        href = link_tag["href"]
+        name = clean_product_name(name_tag.get_text(strip=True))
+        logging.debug(name)
+        try:
+            price = convert_price_to_int(price_tag.get_text().strip())
+        except ValueError as exc:
+            logging.error("Invalid price for product %s on %s: %s", name, url, exc)
+            return "SCRAPE_FAILED"
 
         products.append({"name": name, "price": price, "link": href, "inStock": True})
 
@@ -113,7 +135,7 @@ def scrape_all_products(base_url):
 
     Returns:
         list: List of all product dictionaries if successful
-        "SCRAPE_FAILED": If any page returned a non-200/404 error
+        "SCRAPE_FAILED": If any page could not be fetched or parsed reliably
     """
     all_products = []
     page_number = 1
@@ -127,12 +149,15 @@ def scrape_all_products(base_url):
             logging.error(f"Scraping failed on page {page_number}. Aborting entire scrape run.")
             return "SCRAPE_FAILED"
 
-        # None means 404 - end of pagination (expected)
+        # A 404 ends pagination only after the category was successfully read.
         if products is None:
+            if page_number == 1:
+                logging.error("Product category not found: %s", base_url)
+                return "SCRAPE_FAILED"
             logging.info(f"No more product listing. End of page")
             break
 
-        # Empty list means no products found on this page (shouldn't happen, but handle gracefully)
+        # An empty list is returned only for an explicit no-products notice.
         if not products:
             logging.info(f"No products found on page {page_number}. End of page")
             break
@@ -153,7 +178,7 @@ def process_gameloot_stock(base_url="https://gameloot.in/product-category/graphi
     logging.info(f"Started at: {datetime.now()}")
     all_products = scrape_all_products(base_url)
     if all_products == "SCRAPE_FAILED":
-        logging.warning("Scraping failed with non-200 response. Aborting to prevent false 'sold' notifications. Will retry on next scheduled run.")
+        logging.warning("Scraping failed. Aborting to prevent false 'sold' notifications. Will retry on next scheduled run.")
         return "SCRAPE_FAILED"
 
     all_products = remove_list_duplicates(all_products)
@@ -278,7 +303,7 @@ def track_gpu():
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("GPU tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
-            logging.warning("GPU tracking skipped due to scraping failure (non-200 response)")
+            logging.warning("GPU tracking skipped due to scraping failure")
     except Exception as e:
         logging.error(f"Error in track_gpu: {e}", exc_info=True)
 
@@ -292,7 +317,7 @@ def track_cpu():
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("CPU tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
-            logging.warning("CPU tracking skipped due to scraping failure (non-200 response)")
+            logging.warning("CPU tracking skipped due to scraping failure")
     except Exception as e:
         logging.error(f"Error in track_cpu: {e}", exc_info=True)
 
@@ -306,7 +331,7 @@ def track_mobo():
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("Mobo tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
-            logging.warning("Mobo tracking skipped due to scraping failure (non-200 response)")
+            logging.warning("Mobo tracking skipped due to scraping failure")
     except Exception as e:
         logging.error(f"Error in track_mobo: {e}", exc_info=True)
 
@@ -320,6 +345,6 @@ def track_ram():
         if result == "MONGODB_UNAVAILABLE":
             logging.warning("RAM tracking skipped due to MongoDB unavailability")
         elif result == "SCRAPE_FAILED":
-            logging.warning("RAM tracking skipped due to scraping failure (non-200 response)")
+            logging.warning("RAM tracking skipped due to scraping failure")
     except Exception as e:
         logging.error(f"Error in track_ram: {e}", exc_info=True)
