@@ -1,35 +1,25 @@
-# Use Python 3.9 slim image as base
-FROM python:3.9-slim
+FROM python:3.12-slim
 
-# Set working directory
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
 
-# Install system dependencies if needed
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+# Dependencies first so code changes don't invalidate the layer.
+COPY pyproject.toml README.md ./
+RUN mkdir -p src/stockwatch && touch src/stockwatch/__init__.py \
+    && pip install . && pip uninstall -y stockwatch
 
-# Copy requirements file
-COPY reqs.txt .
+COPY src ./src
+RUN pip install --no-deps . && rm -rf src
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r reqs.txt
-
-# Copy application files
-COPY scraper.py .
-COPY gameloot.py .
-COPY cex.py .
-COPY db_utils.py .
-COPY telegram_helper.py .
-COPY logging_config.py .
-COPY dict_list_search.py .
-
-# Create a non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1000 appuser
 USER appuser
 
-# Set environment variables (can be overridden at runtime)
-ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
 
-# Run the scraper
-CMD ["python", "scraper.py"]
-
+CMD ["python", "-m", "stockwatch"]

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stockwatch</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M7 20l6-6 4 4 8-8' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M7 20l6-6 4 4 8-8"/></svg>
+        <span>Stockwatch</span>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="overview">Overview</button>
+        <button role="tab" data-tab="runs">Runs</button>
+        <button role="tab" data-tab="products">Products</button>
+      </nav>
+      <div class="controls">
+        <span id="engine-state" class="pill">…</span>
+        <label class="limit" title="Maximum scrape runs active at the same time, across all sites">
+          <span>Max active</span>
+          <span class="stepper">
+            <button type="button" data-action="limit-step" data-step="-1" aria-label="Decrease">−</button>
+            <input id="limit" type="number" min="1" max="50" inputmode="numeric" aria-label="Max active runs">
+            <button type="button" data-action="limit-step" data-step="1" aria-label="Increase">+</button>
+          </span>
+        </label>
+        <button id="pause-btn" class="btn" data-action="toggle-pause">Pause</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="tab-overview" class="tab-panel">
+      <div id="stats" class="stats"></div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Activity</h2>
+          <div id="slots" class="slots" aria-label="Active run slots"></div>
+        </div>
+        <div id="activity" class="activity"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Sites &amp; categories</h2>
+          <p class="hint">Categories of the same site always run one at a time.</p></div>
+        <div id="sites"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Recent runs</h2>
+          <button class="btn ghost" data-action="goto" data-tab="runs">All runs →</button></div>
+        <div id="recent-runs"></div>
+      </section>
+    </section>
+
+    <section id="tab-runs" class="tab-panel" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>Run history</h2>
+          <div class="filters">
+            <select id="runs-category" aria-label="Category"><option value="">All categories</option></select>
+            <select id="runs-status" aria-label="Status">
+              <option value="">Any status</option>
+              <option>success</option><option>failed</option><option>running</option><option>queued</option>
+              <option>cancelled</option><option>interrupted</option>
+            </select>
+          </div>
+        </div>
+        <div id="runs"></div>
+      </section>
+    </section>
+
+    <section id="tab-products" class="tab-panel" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>Products</h2>
+          <div class="filters">
+            <input id="products-q" type="search" placeholder="Search name…" aria-label="Search">
+            <select id="products-category" aria-label="Category"><option value="">All categories</option></select>
+            <select id="products-stock" aria-label="Stock">
+              <option value="">In &amp; out of stock</option>
+              <option value="true" selected>In stock</option>
+              <option value="false">Sold out</option>
+            </select>
+            <select id="products-sort" aria-label="Sort">
+              <option value="newest">Newest first</option>
+              <option value="recent">Recently seen</option>
+              <option value="price">Price ↑</option>
+              <option value="-price">Price ↓</option>
+              <option value="name">Name</option>
+            </select>
+          </div>
+        </div>
+        <div id="products"></div>
+        <div id="products-pager" class="pager"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
