@@ -99,3 +99,13 @@ def test_run_conflicts_and_cancel(client):
     wait_idle(client)
     assert client.get("/api/runs").json()[0]["status"] == "cancelled"
     assert client.post(f"/api/runs/{run_id}/cancel").status_code == 404
+
+
+def test_status_stats_follow_runs(client):
+    assert client.get("/api/status").json()["recent_runs"] == []
+    run_id = client.post("/api/categories/shop:a/run").json()["run_id"]
+    wait_idle(client)
+    body = client.get("/api/status").json()
+    assert body["products"] == {"total": 1, "in_stock": 1}
+    assert body["runs_24h"] == {"success": 1}
+    assert [r["id"] for r in body["recent_runs"]] == [run_id]

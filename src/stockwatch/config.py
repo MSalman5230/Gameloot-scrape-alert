@@ -22,7 +22,9 @@ class Config(BaseSettings):
 
     # Initial value only; the live value is stored in the DB and edited from the dashboard.
     default_max_concurrent_runs: int = Field(5, ge=1, le=50)
-    scheduler_tick_seconds: float = 5.0
+    # The scheduler sleeps until the next category is due and is woken by dashboard edits; this caps
+    # the sleep, i.e. how late it notices changes made directly in the database.
+    scheduler_tick_seconds: float = 60.0
     run_timeout_seconds: float = 15 * 60
 
     @cached_property

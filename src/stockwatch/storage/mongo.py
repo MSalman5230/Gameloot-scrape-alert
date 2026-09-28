@@ -69,7 +69,9 @@ class MongoStore:
             [("queued_at", ASCENDING)], expireAfterSeconds=int(RUN_RETENTION.total_seconds())
         )
         await self.runs.create_index([("category_id", ASCENDING), ("queued_at", DESCENDING)])
-        await self.runs.create_index([("status", ASCENDING)])
+        await self.runs.create_index([("status", ASCENDING), ("queued_at", DESCENDING)])
+        if "status_1" in await self.runs.index_information():  # superseded by the index above
+            await self.runs.drop_index("status_1")
 
     async def close(self) -> None:
         await self.client.close()
@@ -261,9 +263,7 @@ class MongoStore:
             .skip(skip)
             .limit(limit)
         )
-        items = await cursor.to_list()
-        total = await self.products.count_documents(query)
-        return items, total
+        return await asyncio.gather(cursor.to_list(), self.products.count_documents(query))
 
     async def product_counts(self) -> dict[str, int]:
         pipeline = [

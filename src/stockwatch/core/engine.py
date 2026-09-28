@@ -8,11 +8,16 @@ Rules enforced here:
 A job waiting for its site is skipped rather than blocking the queue, so it never holds a global slot
 and jobs of other sites keep flowing. Dispatching is synchronous and happens whenever state changes
 (enqueue, run finished, settings changed), so there is no polling for free slots.
+
+The ticker sleeps until the next category is due. Every change to scheduling state wakes it early;
+its maximum sleep (`tick_seconds`) only bounds how late it notices edits made directly in the DB.
 """
 
 import asyncio
+import contextlib
 import logging
 import random
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -26,6 +31,10 @@ from stockwatch.sites.http import SiteHttp, make_site_http
 from stockwatch.storage import Store
 
 log = logging.getLogger(__name__)
+
+RECENT_RUNS = 8
+# Run counts cover a rolling 24h window, so cached stats are recomputed at least this often.
+STATS_MAX_AGE = 60.0
 
 
 class AlreadyActive(Exception):
@@ -84,7 +93,7 @@ class Engine:
         adapters: dict[str, SiteAdapter],
         *,
         default_settings: RuntimeSettings | None = None,
-        tick_seconds: float | None = 5.0,  # None: no background ticker (tests drive enqueue_due)
+        tick_seconds: float | None = 60.0,  # max ticker sleep; None: no ticker (tests drive enqueue_due)
         run_timeout: float = 15 * 60,
         jitter: float = 0.1,
         startup_stagger: float = 5.0,
@@ -106,7 +115,11 @@ class Engine:
         self._http: dict[str, SiteHttp] = {}
         self._lock = asyncio.Lock()
         self._ticker: asyncio.Task | None = None
+        self._wake = asyncio.Event()
         self._stopping = False
+        # Bumped on every run write; cached stats are only valid for the generation they were read at.
+        self._stats_gen = 0
+        self._stats: tuple[int, float, dict[str, Any]] | None = None
 
     # -- lifecycle ------------------------------------------------------------------------------
 
@@ -137,7 +150,7 @@ class Engine:
         await asyncio.gather(*tasks, return_exceptions=True)
         now = utcnow()
         for job in self._queue:
-            await self.store.update_run(job.run_id, {"status": RunStatus.INTERRUPTED, "finished_at": now})
+            await self._update_run(job.run_id, {"status": RunStatus.INTERRUPTED, "finished_at": now})
         self._queue.clear()
         await asyncio.gather(*(h.aclose() for h in self._http.values()), return_exceptions=True)
 
@@ -166,29 +179,42 @@ class Engine:
 
     async def _tick_loop(self) -> None:
         while True:
+            # Cleared before looking, so a change made while enqueue_due runs still ends the wait below.
+            self._wake.clear()
+            delay = self._tick_seconds
             try:
-                await self.enqueue_due()
+                upcoming = await self.enqueue_due()
+                if upcoming is not None:
+                    delay = min(delay, max(0.0, (upcoming - utcnow()).total_seconds()))
             except Exception:
                 log.exception("Scheduler tick failed")
-            await asyncio.sleep(self._tick_seconds)
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(delay):
+                    await self._wake.wait()
+
+    def _wake_scheduler(self) -> None:
+        self._wake.set()
 
     # -- queueing -------------------------------------------------------------------------------
 
-    async def enqueue_due(self) -> None:
+    async def enqueue_due(self) -> datetime | None:
+        """Queue every due category. Returns when the next idle category becomes due (None if none is:
+        paused, or every category is disabled or active; finishing a run wakes the ticker anyway)."""
         if self.settings.paused:
-            return
+            return None
         now = utcnow()
+        upcoming: list[datetime] = []
         for cat in await self.store.list_categories():
-            if (
-                cat.enabled
-                and cat.site in self.adapters
-                and _is_due(cat, now)
-                and not self.active_job(cat.id)
-            ):
-                try:
-                    await self.enqueue(cat.id, Trigger.SCHEDULE)
-                except AlreadyActive:
-                    pass
+            if not cat.enabled or cat.site not in self.adapters or self.active_job(cat.id):
+                continue
+            if not _is_due(cat, now):
+                upcoming.append(cat.next_run_at)
+                continue
+            try:
+                await self.enqueue(cat.id, Trigger.SCHEDULE)
+            except AlreadyActive:
+                pass
+        return min(upcoming, default=None)
 
     async def enqueue(self, category_id: str, trigger: Trigger = Trigger.MANUAL) -> Job | None:
         """Queue a run. Raises KeyError for unknown categories and AlreadyActive for duplicates.
@@ -203,7 +229,7 @@ class Engine:
             if trigger is Trigger.SCHEDULE and not (cat.enabled and _is_due(cat, now)):
                 return None
             job = Job(run_id=uuid4().hex, category=cat, trigger=trigger, queued_at=now)
-            await self.store.insert_run(
+            await self._insert_run(
                 RunRecord(
                     id=job.run_id,
                     category_id=cat.id,
@@ -265,9 +291,7 @@ class Engine:
         try:
             if job.cancel_requested:
                 raise asyncio.CancelledError
-            await self.store.update_run(
-                job.run_id, {"status": RunStatus.RUNNING, "started_at": job.started_at}
-            )
+            await self._update_run(job.run_id, {"status": RunStatus.RUNNING, "started_at": job.started_at})
             async with asyncio.timeout(self._run_timeout):
                 result = await run_category(
                     self.adapters[cat.site],
@@ -301,13 +325,14 @@ class Engine:
             fields.setdefault("items", job.progress.items)
             fields["finished_at"] = finished
             fields["duration_ms"] = int((finished - job.started_at).total_seconds() * 1000)
-            await self.store.update_run(job.run_id, fields)
+            await self._update_run(job.run_id, fields)
             await self._reschedule(cat.id, finished, fields)
         except Exception:
             log.exception("Could not record the result of run %s", job.run_id)
         finally:
             self._running.pop(job.run_id, None)
             self._dispatch()
+            self._wake_scheduler()
         if cancelled:
             raise asyncio.CancelledError
 
@@ -339,13 +364,14 @@ class Engine:
             if job.run_id == run_id:
                 self._queue.remove(job)
                 now = utcnow()
-                await self.store.update_run(
+                await self._update_run(
                     run_id, {"status": RunStatus.CANCELLED, "finished_at": now, "error": "Cancelled by user"}
                 )
                 cat = await self.store.get_category(job.category.id)
                 if cat and _is_due(cat, now):
                     # Otherwise the next tick would queue it straight back.
                     await self.store.update_category(cat.id, {"next_run_at": self._next_run(cat, now)})
+                self._wake_scheduler()
                 return
         job = self._running.get(run_id)
         if job is None:
@@ -362,6 +388,7 @@ class Engine:
         self.settings = updated
         log.info("Settings updated: %s", updated.model_dump())
         self._dispatch()
+        self._wake_scheduler()
         return updated
 
     async def update_category(
@@ -379,9 +406,38 @@ class Engine:
                 fields["next_run_at"] = cat.last_run_at + timedelta(minutes=interval_minutes)
         if not fields:
             return cat
-        return await self.store.update_category(category_id, fields)
+        updated = await self.store.update_category(category_id, fields)
+        self._wake_scheduler()
+        return updated
+
+    # -- run records ----------------------------------------------------------------------------
+
+    async def _insert_run(self, run: RunRecord) -> None:
+        await self.store.insert_run(run)
+        self._stats_gen += 1
+
+    async def _update_run(self, run_id: str, fields: dict[str, Any]) -> None:
+        await self.store.update_run(run_id, fields)
+        self._stats_gen += 1
 
     # -- introspection --------------------------------------------------------------------------
+
+    async def stats(self) -> dict[str, Any]:
+        """Run/product counters and recent runs for the dashboard. They only change when a run record
+        is written (products are saved just before the run's final update), so they are served from
+        memory until then instead of aggregating over the collections on every poll."""
+        gen = self._stats_gen
+        if self._stats and self._stats[0] == gen and time.monotonic() - self._stats[1] < STATS_MAX_AGE:
+            return self._stats[2]
+        runs_24h, products, recent = await asyncio.gather(
+            self.store.run_counts(utcnow() - timedelta(hours=24)),
+            self.store.product_counts(),
+            self.store.list_runs(limit=RECENT_RUNS),
+        )
+        value = {"runs_24h": runs_24h, "products": products, "recent_runs": recent}
+        if gen == self._stats_gen:  # a run write during the reads would make this stale
+            self._stats = (gen, time.monotonic(), value)
+        return value
 
     def snapshot(self) -> dict[str, Any]:
         busy = {j.site for j in self._running.values()}

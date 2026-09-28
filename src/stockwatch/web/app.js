@@ -292,10 +292,26 @@ function renderProducts(data) {
 
 // ---------------------------------------------------------------- data loading
 
+// Poll fast only while something is queued or running; the numbers can't change otherwise.
+const POLL_ACTIVE_MS = 3000;
+const POLL_IDLE_MS = 15000;
 let refreshing = false;
+let refreshAgain = false;
+let pollTimer;
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  const engine = state.status?.engine;
+  const busy = engine && (engine.running.length || engine.queued.length);
+  pollTimer = setTimeout(() => (document.hidden ? schedulePoll() : refresh()), busy ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+}
 
 async function refresh() {
-  if (refreshing) return;
+  if (refreshing) {
+    // A poll already in flight may predate an action the user just took; refresh again after it.
+    refreshAgain = true;
+    return;
+  }
   refreshing = true;
   try {
     const [status, sites] = await Promise.all([api("/status"), api("/sites")]);
@@ -310,7 +326,7 @@ async function refresh() {
       renderSlots();
       renderActivity();
       renderSites();
-      render($("#recent-runs"), runsTable(await api("/runs?limit=8"), { compact: true }));
+      render($("#recent-runs"), runsTable(status.recent_runs, { compact: true }));
     } else if (state.tab === "runs") {
       await loadRuns();
     }
@@ -319,6 +335,11 @@ async function refresh() {
     console.error(err);
   } finally {
     refreshing = false;
+    schedulePoll();
+  }
+  if (refreshAgain) {
+    refreshAgain = false;
+    await refresh();
   }
 }
 
@@ -438,7 +459,6 @@ function showTab(tab) {
 // Live clocks without re-rendering tables.
 setInterval(() => tickClocks(), 1000);
 
-setInterval(() => { if (!document.hidden) refresh(); }, 3000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
 window.addEventListener("hashchange", () => {

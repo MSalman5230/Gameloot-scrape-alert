@@ -274,3 +274,53 @@ async def test_interval_edit_reschedules_from_last_run():
     await wait_idle(engine)
     cat = await engine.update_category("shop:a", interval_minutes=60)
     assert cat.next_run_at == cat.last_run_at + timedelta(minutes=60)
+
+
+async def test_stats_are_cached_until_a_run_is_recorded():
+    store = MemoryStore()
+    calls = 0
+    product_counts = store.product_counts
+
+    async def counting_product_counts():
+        nonlocal calls
+        calls += 1
+        return await product_counts()
+
+    store.product_counts = counting_product_counts
+    engine = make_engine(FakeSite("shop"), store=store)
+    await engine.start()
+    assert (await engine.stats())["products"] == {"total": 0, "in_stock": 0}
+    await engine.stats()
+    assert calls == 1
+
+    await engine.enqueue("shop:a")
+    await wait_idle(engine)
+    stats = await engine.stats()
+    assert stats["products"] == {"total": 1, "in_stock": 1}
+    assert stats["runs_24h"] == {RunStatus.SUCCESS: 1}
+    assert [r.status for r in stats["recent_runs"]] == [RunStatus.SUCCESS]
+    assert calls == 2
+
+
+async def test_ticker_sleeps_until_due_and_wakes_on_changes():
+    engine = make_engine(FakeSite("shop"), tick_seconds=60)
+    await engine.start()
+    try:
+        await wait_for(lambda: len(engine.store.runs) == 1)  # never run before, so due at once
+        await wait_idle(engine)
+
+        # Due in 0.1s: an edit wakes the ticker, which then sleeps only until then (not the 60s cap).
+        await engine.store.update_category("shop:a", {"next_run_at": utcnow() + timedelta(seconds=0.1)})
+        await engine.update_category("shop:a", enabled=True)
+        await wait_for(lambda: len(engine.store.runs) == 2, timeout=2)
+        await wait_idle(engine)
+
+        await engine.update_settings(paused=True)
+        await engine.store.update_category("shop:a", {"next_run_at": utcnow()})
+        await asyncio.sleep(0.1)
+        assert len(engine.store.runs) == 2
+        await engine.update_settings(paused=False)
+        await wait_for(lambda: len(engine.store.runs) == 3, timeout=2)
+        await wait_idle(engine)
+    finally:
+        await engine.stop()

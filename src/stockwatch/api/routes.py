@@ -1,6 +1,5 @@
 """JSON API consumed by the dashboard."""
 
-from datetime import timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -51,13 +50,7 @@ async def health(engine: EngineDep):
 
 @router.get("/status")
 async def get_status(engine: EngineDep) -> dict[str, Any]:
-    store = _store(engine)
-    return {
-        "server_time": utcnow(),
-        "engine": engine.snapshot(),
-        "runs_24h": await store.run_counts(utcnow() - timedelta(hours=24)),
-        "products": await store.product_counts(),
-    }
+    return {"server_time": utcnow(), "engine": engine.snapshot(), **await engine.stats()}
 
 
 @router.get("/settings")

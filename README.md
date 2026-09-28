@@ -38,7 +38,7 @@ src/stockwatch/
 ```
 
 How scheduling works:
-1. A ticker queues every enabled category whose `next_run_at` has passed.
+1. A ticker queues every enabled category whose `next_run_at` has passed, then sleeps until the next one is due. Dashboard edits (intervals, enable, resume, cancel) and finished runs wake it early.
 2. The dispatcher starts a queued job only if both of these hold:
    - a global slot is free;
    - no other job of the same site is running.
@@ -77,6 +77,7 @@ For a quick try-out without MongoDB, set `MONGODB_URI=memory://`. Nothing is per
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | |
 | `DEFAULT_MAX_CONCURRENT_RUNS` | `5` | Initial value only; after that it's edited in the dashboard and stored in the DB. |
 | `RUN_TIMEOUT_SECONDS` | `900` | A run taking longer than this fails. |
+| `SCHEDULER_TICK_SECONDS` | `60` | Longest the scheduler sleeps; only matters for edits made directly in the DB. |
 
 ## Data
 
