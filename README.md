@@ -51,8 +51,10 @@ How scheduling works:
 
 ```bash
 cp .env.example .env   # then fill in MONGODB_URI, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS
-docker compose up -d
+docker compose up -d --remove-orphans
 ```
+
+`--remove-orphans` matters when upgrading from the old single-script version: its Compose service was named `gameloot-scraper` and holds the same container name, which would otherwise block the new one from starting.
 
 Then open `http://<host>:8000`. The dashboard has no authentication, so only expose it on a trusted network.
 
@@ -76,7 +78,7 @@ For a quick try-out without MongoDB, set `MONGODB_URI=memory://`. Nothing is per
 | `LOG_LEVEL` | `INFO` | |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | |
 | `DEFAULT_MAX_CONCURRENT_RUNS` | `5` | Initial value only; after that it's edited in the dashboard and stored in the DB. |
-| `RUN_TIMEOUT_SECONDS` | `900` | A run taking longer than this fails. |
+| `RUN_TIMEOUT_SECONDS` | `900` | Scraping taking longer than this fails the run. Saving and alerting afterwards is never cut off. |
 | `SCHEDULER_TICK_SECONDS` | `60` | Longest the scheduler sleeps; only matters for edits made directly in the DB. |
 
 ## Data

@@ -3,6 +3,8 @@ services:
     image: ghcr.io/msalman5230/gameloot-scrape-alert:latest
     container_name: gameloot-scrape-alert
     restart: unless-stopped
+    # Shutdown lets runs that are saving results finish sending their alerts (incl. Telegram retries).
+    stop_grace_period: 60s
     env_file:
       - .env
     ports:

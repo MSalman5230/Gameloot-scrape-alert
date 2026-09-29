@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -74,7 +76,9 @@ class SiteHttp:
             else:
                 if response.status_code not in RETRYABLE_STATUS or last:
                     return response
-                delay = _retry_after(response) or self.retry_backoff * 2**attempt
+                delay = _retry_after(response)
+                if delay is None:
+                    delay = self.retry_backoff * 2**attempt
                 log.warning("HTTP %s for %s; retrying in %.0fs", response.status_code, url, delay)
             await asyncio.sleep(delay)
         raise AssertionError("unreachable")
@@ -84,10 +88,21 @@ class SiteHttp:
 
 
 def _retry_after(response: httpx.Response) -> float | None:
-    try:
-        return min(float(response.headers["Retry-After"]), MAX_RETRY_AFTER)
-    except (KeyError, ValueError):
+    """Retry-After as seconds, clamped to [0, MAX_RETRY_AFTER]; it may be seconds or an HTTP-date."""
+    value = response.headers.get("Retry-After", "").strip()
+    if not value:
         return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - datetime.now(UTC)).total_seconds()
+    return max(0.0, min(seconds, MAX_RETRY_AFTER))  # this order also maps NaN to 0
 
 
 def make_site_http(adapter) -> SiteHttp:

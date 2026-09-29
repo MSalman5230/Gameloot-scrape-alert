@@ -60,6 +60,9 @@ class Job:
     cancel_requested: bool = False
 
     def request_cancel(self) -> None:
+        # A second Task.cancel() would land in _execute's result recording and abort it.
+        if self.cancel_requested:
+            return
         self.cancel_requested = True
         if self.executing and self.task:
             self.task.cancel()
@@ -143,7 +146,10 @@ class Engine:
         self._stopping = True
         tasks = [j.task for j in self._running.values() if j.task]
         for job in self._running.values():
-            job.request_cancel()
+            # Runs past scraping are saving results and sending alerts; cutting them off would store
+            # the new stock state without ever alerting on it, so they are left to finish.
+            if job.progress.phase == "scraping":
+                job.request_cancel()
         if self._ticker:
             self._ticker.cancel()
             tasks.append(self._ticker)
@@ -292,15 +298,15 @@ class Engine:
             if job.cancel_requested:
                 raise asyncio.CancelledError
             await self._update_run(job.run_id, {"status": RunStatus.RUNNING, "started_at": job.started_at})
-            async with asyncio.timeout(self._run_timeout):
-                result = await run_category(
-                    self.adapters[cat.site],
-                    self._http_for(cat.site),
-                    self.store,
-                    self.notifier,
-                    cat,
-                    job.progress,
-                )
+            result = await run_category(
+                self.adapters[cat.site],
+                self._http_for(cat.site),
+                self.store,
+                self.notifier,
+                cat,
+                job.progress,
+                scrape_timeout=self._run_timeout,
+            )
             fields = {"status": RunStatus.SUCCESS, **asdict(result)}
         except ScrapeError as exc:
             log.warning("Run %s failed: %s", cat.id, exc)

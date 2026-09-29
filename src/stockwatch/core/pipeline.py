@@ -1,5 +1,6 @@
 """One scrape run of one category: scrape -> diff -> persist -> notify."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -31,9 +32,13 @@ async def run_category(
     notifier: Notifier,
     category: Category,
     progress: Progress,
+    *,
+    scrape_timeout: float | None = None,
 ) -> RunResult:
-    """Raises ScrapeError (or anything else) before touching storage if the listing is incomplete."""
-    items = await adapter.scrape_category(http, category.url, progress)
+    """Raises ScrapeError (or anything else) before touching storage if the listing is incomplete.
+    The timeout (TimeoutError) only covers scraping: once saving starts, the alerts must go out too."""
+    async with asyncio.timeout(scrape_timeout):
+        items = await adapter.scrape_category(http, category.url, progress)
 
     progress.phase = "saving"
     known = await store.load_products(category.site, category.key)

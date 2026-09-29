@@ -3,9 +3,9 @@ from datetime import timedelta
 
 import pytest
 
-from conftest import FakeSite, make_engine, wait_for, wait_idle
-from stockwatch.core.engine import AlreadyActive, NotCancellable
-from stockwatch.models import RunRecord, RunStatus, Trigger, utcnow
+from conftest import FakeSite, RecordingNotifier, make_engine, wait_for, wait_idle
+from stockwatch.core.engine import AlreadyActive, Job, NotCancellable
+from stockwatch.models import RunRecord, RunStatus, ScrapedItem, Trigger, utcnow
 from stockwatch.storage import MemoryStore
 
 
@@ -324,3 +324,76 @@ async def test_ticker_sleeps_until_due_and_wakes_on_changes():
         await wait_idle(engine)
     finally:
         await engine.stop()
+
+
+class GatedNotifier(RecordingNotifier):
+    """Blocks every send until `gate` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.waiting = False
+
+    async def send(self, text: str) -> None:
+        self.waiting = True
+        await self.gate.wait()
+        await super().send(text)
+
+
+async def _engine_alerting_on_next_run(notifier, **options):
+    """An engine whose shop:a has a baseline, so its next run finds a new product and alerts."""
+    site = FakeSite("shop")
+    engine = make_engine(site, notifier=notifier, **options)
+    await engine.start()
+    notifier.gate.set()
+    await engine.enqueue("shop:a")
+    await wait_idle(engine)
+    notifier.gate.clear()
+    site.listings["https://shop.test/a"] = [
+        ScrapedItem("https://shop.test/a/p1", "Product 1", 100),
+        ScrapedItem("https://shop.test/a/p2", "Product 2", 200),
+    ]
+    return engine
+
+
+async def test_stop_lets_runs_that_are_alerting_finish():
+    notifier = GatedNotifier()
+    engine = await _engine_alerting_on_next_run(notifier)
+    job = await engine.enqueue("shop:a")
+    await wait_for(lambda: notifier.waiting)
+    stopping = asyncio.create_task(engine.stop())
+    await asyncio.sleep(0.02)
+    assert not stopping.done()
+    notifier.gate.set()
+    await stopping
+    assert engine.store.runs[job.run_id].status == RunStatus.SUCCESS
+    assert any("Product 2" in m for m in notifier.messages)
+
+
+async def test_run_timeout_does_not_cut_off_alerts():
+    notifier = GatedNotifier()
+    engine = await _engine_alerting_on_next_run(notifier, run_timeout=0.05)
+    job = await engine.enqueue("shop:a")
+    await wait_for(lambda: notifier.waiting)
+    await asyncio.sleep(0.1)  # well past the run timeout
+    notifier.gate.set()
+    await wait_idle(engine)
+    assert engine.store.runs[job.run_id].status == RunStatus.SUCCESS
+    assert any("Product 2" in m for m in notifier.messages)
+
+
+class CountingTask:
+    def __init__(self) -> None:
+        self.cancels = 0
+
+    def cancel(self) -> None:
+        self.cancels += 1
+
+
+def test_repeated_cancel_is_delivered_once():
+    cat = make_engine(FakeSite("shop"))._seed_categories()[0]
+    job = Job(run_id="r", category=cat, trigger=Trigger.MANUAL, queued_at=utcnow(), executing=True)
+    job.task = CountingTask()
+    job.request_cancel()
+    job.request_cancel()  # e.g. a double click, or shutdown after a user cancel
+    assert job.task.cancels == 1

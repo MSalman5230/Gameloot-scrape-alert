@@ -7,6 +7,16 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+// Product links come from scraped HTML; esc() doesn't stop a javascript: URL, so allow only http(s).
+const safeUrl = (value) => {
+  try {
+    const url = new URL(value, location.href);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "#";
+  } catch {
+    return "#";
+  }
+};
+
 async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
@@ -269,7 +279,7 @@ function renderProducts(data) {
         : `<span class="chg sold" title="was ${fmtPrice(prev)}">▲ ${fmtPrice(prev)}</span>`;
       return `
         <tr class="${p.in_stock ? "" : "disabled"}">
-          <td data-label="Product"><a href="${esc(p.url)}" target="_blank" rel="noopener" class="strong">${esc(p.name)}</a></td>
+          <td data-label="Product"><a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener" class="strong">${esc(p.name)}</a></td>
           <td data-label="Category" class="muted nowrap">${esc(cat ? `${cat.siteName} · ${cat.name}` : `${p.site} · ${p.category}`)}</td>
           <td data-label="Price" class="num"><span class="mono">${fmtPrice(p.price)}</span> ${trend}</td>
           <td data-label="Stock">${p.in_stock ? `<span class="badge success">in stock</span>` : `<span class="badge sold">sold</span>`}</td>

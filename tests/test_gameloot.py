@@ -1,3 +1,6 @@
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+
 import httpx
 import pytest
 import respx
@@ -5,7 +8,7 @@ import respx
 from stockwatch.models import ScrapedItem
 from stockwatch.sites.base import Progress
 from stockwatch.sites.gameloot import Gameloot, clean_name, listing_page_url, parse_price
-from stockwatch.sites.http import ScrapeError, make_site_http
+from stockwatch.sites.http import MAX_RETRY_AFTER, ScrapeError, _retry_after, make_site_http
 
 BASE = "https://gameloot.in/product-category/graphics-card/"
 PAGE1 = listing_page_url(BASE, 1)
@@ -172,3 +175,27 @@ async def test_repeated_page_is_detected(http, mock):
     page(mock, PAGE2, PRODUCT)  # e.g. the site redirects past-the-end pages back to page 1
     with pytest.raises(ScrapeError, match="pagination"):
         await scrape(http)
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("soon", None),
+        ("0", 0.0),
+        ("-5", 0.0),
+        ("7", 7.0),
+        ("99999", MAX_RETRY_AFTER),
+    ],
+)
+def test_retry_after_seconds(header, expected):
+    headers = {} if header is None else {"Retry-After": header}
+    assert _retry_after(httpx.Response(429, headers=headers)) == expected
+
+
+def test_retry_after_http_date():
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=30), usegmt=True)
+    past = format_datetime(datetime.now(UTC) - timedelta(seconds=30), usegmt=True)
+    assert 25 < _retry_after(httpx.Response(503, headers={"Retry-After": future})) <= 30
+    assert _retry_after(httpx.Response(503, headers={"Retry-After": past})) == 0.0
