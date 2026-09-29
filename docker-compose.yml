@@ -5,10 +5,24 @@ services:
     restart: unless-stopped
     # Shutdown lets runs that are saving results finish sending their alerts (incl. Telegram retries).
     stop_grace_period: 60s
-    env_file:
-      - .env
+    # Each value is ${VAR:-default}: override by exporting VAR in the shell or setting it in a
+    # .env file next to this compose file (Compose reads it automatically for substitution).
+    environment:
+      # --- Mandatory ---
+      # DB name comes from the URI path (default: gamelootScrape).
+      MONGODB_URI: "${MONGODB_URI:-mongodb://user:pass@host:27017/gamelootScrape?authSource=admin}"
+      # Without these two, alerts are only written to the log.
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_CHAT_IDS: "${TELEGRAM_CHAT_IDS:-6071212724}"  # comma-separated
+
+      # --- Optional ---
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      DEFAULT_MAX_CONCURRENT_RUNS: "${DEFAULT_MAX_CONCURRENT_RUNS:-5}"  # initial value only; later edited in the dashboard
+      RUN_TIMEOUT_SECONDS: "${RUN_TIMEOUT_SECONDS:-900}"
+      SCHEDULER_TICK_SECONDS: "${SCHEDULER_TICK_SECONDS:-60}"
+      PORT: "${PORT:-8000}"
     ports:
-      - "8000:8000"  # dashboard: http://<host>:8000 (no auth; keep it on a trusted network)
+      - "${PORT:-8000}:${PORT:-8000}"  # dashboard: http://<host>:8000 (no auth; keep it on a trusted network)
     logging:
       driver: "json-file"
       options:
