@@ -1,229 +1,151 @@
-# Gameloot Stock Alert Bot
+# Stockwatch
 
-A Python-based web scraping application that monitors [Gameloot.in](https://gameloot.in) for PC component stock changes and sends real-time Telegram notifications when products become available or go out of stock.
+Watches shop listings for stock changes, sends Telegram alerts for new, back-in-stock and sold-out items, and provides a web dashboard to control scraping and see what's happening.
+
+It currently tracks [Gameloot.in](https://gameloot.in) (GPUs, CPUs, motherboards, RAM). It's built so that other sites can be added as plug-in adapters.
 
 ## Features
 
-- **Real-time Monitoring**: Continuously tracks stock changes for PC components
-- **Multi-Component Support**: Monitors GPUs, CPUs, motherboards, and RAM
-- **Smart Deduplication**: Automatically removes duplicate products
-- **Telegram Notifications**: Instant alerts via Telegram bot for stock changes
-- **MongoDB Storage**: Persistent storage of product information and stock status
-- **Scheduled Scraping**: Automated scraping at configurable intervals
-- **Comprehensive Logging**: Detailed logging for monitoring and debugging
+- **Dashboard** at `http://localhost:8000`:
+  - Live running and queued jobs, with page progress and a Cancel button.
+  - Per-category enable toggle, interval, and "Run now".
+  - Pause or resume the scheduler.
+  - Run history and a searchable product browser.
+- **Rate-limit safe**:
+  - Categories of the same site never run at the same time.
+  - Requests to a site are spaced out, and 429/5xx responses are retried with backoff (`Retry-After` is honoured).
+- **Global concurrency cap** on active runs across all sites. The default is 5, and you can change it live from the dashboard.
+- **No false "sold" alerts**: a run only touches stored stock state after the *entire* listing has been read successfully. Any failed page or unparseable product fails the run with no writes.
+- **Quiet first run**: a category's first run records a baseline and sends no alerts.
+- **Price history** is stored for every product.
 
-## 🛠️ Supported Components
+## Architecture
 
-- **Graphics Cards** - Scraped every 15 minutes
-- **CPUs** - Scraped every 22 minutes  
-- **Motherboards** - Scraped every 27 minutes
-- **RAM** - Currently disabled (can be enabled in code)
-
-## 📋 Prerequisites
-
-- Python 3.7+
-- MongoDB instance
-- Telegram Bot Token
-- Internet connection for web scraping
-
-## 🚀 Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Gameloot-scrape-alert
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r reqs.txt
-   ```
-
-3. **Set up environment variables**
-   Create a `.env` file in the project root:
-   ```env
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-   LOG_FORMAT=%(levelname)s - %(message)s
-   LOG_LEVEL=INFO
-   MONGODB_URI=mongodb://username:password@host:port/?authMechanism=DEFAULT&authSource=database
-   ```
-
-4. **Configure Telegram chat IDs**
-   Update the `CHAT_IDS` list in `telegram_helper.py` with your chat IDs.
-
-## 🔧 Environment Variables
-
-The application uses the following environment variables (defined in `.env` file):
-
-| Variable | Description | Required | Default | Example |
-|----------|-------------|----------|---------|---------|
-| `TELEGRAM_BOT_TOKEN` | Your Telegram bot API token | ✅ Yes | - | `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz` |
-| `MONGODB_URI` | MongoDB connection string | ✅ Yes | `mongodb://localhost:27017` | `mongodb://user:pass@host:port/?authSource=db` |
-| `LOG_FORMAT` | Logging format string | ❌ No | `%(levelname)s - %(message)s` | `%(asctime)s - %(levelname)s - %(message)s` |
-| `LOG_LEVEL` | Logging level | ❌ No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-### Environment Variables Setup
-
-1. **Create `.env` file** in the project root directory
-2. **Add your configuration** following the examples above
-3. **Never commit** the `.env` file to version control (add it to `.gitignore`)
-
-Example `.env` file:
-```env
-# Telegram Configuration
-TELEGRAM_BOT_TOKEN=your_actual_bot_token_here
-
-# MongoDB Configuration
-MONGODB_URI=mongodb://username:password@192.168.11.3:27017/?authMechanism=DEFAULT&authSource=huruhuru
-
-# Logging Configuration
-LOG_FORMAT=%(asctime)s - %(levelname)s - %(message)s
-LOG_LEVEL=INFO
+```
+src/stockwatch/
+  sites/       Site adapters. One module per site; every module here is auto-loaded.
+    base.py      SiteAdapter contract, CategoryDef, Progress, registry
+    http.py      SiteHttp: per-site client, request spacing, retries
+    gameloot.py  Gameloot adapter
+  core/
+    engine.py    Scheduler + dispatcher (global cap, one run per site, pause, cancel)
+    pipeline.py  One run: scrape -> diff -> persist (one bulk write) -> notify
+    diff.py      Pure change detection
+  storage/     Store interface; MongoStore (PyMongo async), MemoryStore (tests/dev), legacy migration
+  notify/      Telegram notifier (with message splitting and retries), log fallback
+  api/         JSON API used by the dashboard
+  web/         Dashboard (static HTML/CSS/JS, no build step)
 ```
 
-## ⚙️ Configuration
+How scheduling works:
+1. A ticker queues every enabled category whose `next_run_at` has passed, then sleeps until the next one is due. Dashboard edits (intervals, enable, resume, cancel) and finished runs wake it early.
+2. The dispatcher starts a queued job only if both of these hold:
+   - a global slot is free;
+   - no other job of the same site is running.
+3. A job waiting on a busy site is skipped, not blocking, so other sites keep flowing.
+4. When a run finishes, the next run is set to `interval ± 10%`. It's saved in the DB, so restarts don't trigger a burst of runs.
 
-### MongoDB Setup
-- Ensure MongoDB is running and accessible
-- Create appropriate collections for each component type
-- Verify authentication credentials
-- Update the `MONGODB_URI` in your `.env` file
+## Running
 
-### Telegram Bot Setup
-1. Create a bot via [@BotFather](https://t.me/botfather)
-2. Get your bot token
-3. Add the token to your `.env` file as `TELEGRAM_BOT_TOKEN`
-4. Start a chat with your bot and get your chat ID
-5. Add your chat ID to the `CHAT_IDS` list in `telegram_helper.py`
+### Docker (recommended)
 
-### Scraping Intervals
-Modify the scheduling in `scraper.py`:
+```bash
+cp .env.example .env   # then fill in MONGODB_URI, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS
+docker compose up -d --remove-orphans
+```
+
+`--remove-orphans` matters when upgrading from the old single-script version: its Compose service was named `gameloot-scraper` and holds the same container name, which would otherwise block the new one from starting.
+
+Then open `http://<host>:8000`. The dashboard has no authentication, so only expose it on a trusted network.
+
+### Locally
+
+```bash
+python -m venv .venv && .venv/Scripts/activate   # or: source .venv/bin/activate
+pip install -e ".[dev]"
+python -m stockwatch
+```
+
+For a quick try-out without MongoDB, set `MONGODB_URI=memory://`. Nothing is persisted in that mode.
+
+### Configuration (environment / `.env`)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MONGODB_URI` | `mongodb://localhost:27017` | DB name comes from the URI path, else `gamelootScrape`. `memory://` for dev. |
+| `TELEGRAM_BOT_TOKEN` | – | If this or the chat IDs are missing, alerts only go to the log. |
+| `TELEGRAM_CHAT_IDS` | – | Comma-separated. |
+| `LOG_LEVEL` | `INFO` | |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | |
+| `DEFAULT_MAX_CONCURRENT_RUNS` | `5` | Initial value only; after that it's edited in the dashboard and stored in the DB. |
+| `RUN_TIMEOUT_SECONDS` | `900` | Scraping taking longer than this fails the run. Saving and alerting afterwards is never cut off. |
+| `SCHEDULER_TICK_SECONDS` | `60` | Longest the scheduler sleeps; only matters for edits made directly in the DB. |
+
+## Data
+
+MongoDB collections:
+
+| Collection | Contents |
+|---|---|
+| `products` | One document per (site, category, url): current price and stock, timestamps, `price_history`. |
+| `categories` | Scrape targets. Enabled flag and interval are user-editable; also holds last-run info and `next_run_at`. |
+| `runs` | Run history (kept for 30 days by a TTL index). |
+| `settings` | Runtime settings: max concurrent runs, paused. |
+
+**Upgrading from v1:** on first start, the old `gameloot_products` collection is copied into `products`, keeping stock state and price history. So the first run after upgrading doesn't re-alert everything. The old collection is left untouched, and the migration runs only once.
+
+## Adding a site
+
+Create `src/stockwatch/sites/<site>.py`:
+
 ```python
-def task_scheduler():
-    schedule.every(15).minutes.do(track_gpu)      # GPU every 15 minutes
-    schedule.every(22).minutes.do(track_cpu)      # CPU every 22 minutes
-    schedule.every(27).minutes.do(track_mobo)     # Motherboard every 27 minutes
-    # schedule.every(27).minutes.do(track_ram)   # RAM (currently disabled)
+from stockwatch.models import ScrapedItem
+from stockwatch.sites.base import CategoryDef, Progress, ScrapeError, SiteAdapter, SiteHttp, register
+
+
+@register
+class ExampleShop(SiteAdapter):
+    key = "exampleshop"                  # stable id, used in the DB
+    name = "Example Shop"
+    base_url = "https://example.com"
+    request_delay = 2.0                  # seconds between requests to this site
+    categories = (
+        CategoryDef("gpu", "Graphics cards", "https://example.com/c/gpu", interval_minutes=20),
+    )
+
+    async def scrape_category(self, http: SiteHttp, url: str, progress: Progress) -> list[ScrapedItem]:
+        items = []
+        # for each page: response = await http.get(page_url)
+        #   raise ScrapeError(...) on anything unexpected -- never return a partial listing
+        #   progress.page_done(len(page_items))
+        return items
 ```
 
-## 🚀 Usage
+That's all. The module is picked up automatically, its categories appear in the dashboard, and the engine keeps its categories from running in parallel.
 
-### Start the monitoring service
+Candidates noted for later: kharidistore.in and gpuheaven.com.
+
+## Development
+
 ```bash
-python scraper.py
+pytest          # offline; HTTP is mocked
+ruff check src tests
 ```
 
-This will start the automated scheduler that continuously monitors all configured components.
+`tests/test_mongo.py` runs against a real, disposable MongoDB when `STOCKWATCH_TEST_MONGODB_URI` is set (it creates and drops the `stockwatch_pytest` database).
 
-### Manual scraping (for testing)
-```bash
-python -c "from gameloot import scrape_all_products; print(scrape_all_products('https://gameloot.in/product-category/graphics-card'))"
-```
+## API
 
-This fetches live listings without updating MongoDB or sending Telegram messages.
+| Method | Path | |
+|---|---|---|
+| GET | `/api/status` | Engine snapshot (running, queued, limit, paused), 24h run counts, product counts |
+| GET / PATCH | `/api/settings` | `{max_concurrent_runs: 1–50, paused: bool}` |
+| GET | `/api/sites` | Sites with their categories and state |
+| PATCH | `/api/categories/{id}` | `{enabled, interval_minutes}` |
+| POST | `/api/categories/{id}/run` | Queue now (409 if already queued/running) |
+| POST | `/api/runs/{id}/cancel` | Cancel a queued or scraping run |
+| GET | `/api/runs` | `?site=&category_id=&status=&limit=` |
+| GET | `/api/products` | `?site=&category=&in_stock=&q=&sort=&page=&page_size=` |
+| GET | `/api/health` | DB ping; used by the Docker healthcheck |
 
-### Regression tests
-```bash
-python -m unittest discover -s tests -v
-```
-
-These tests use mocked HTTP responses and do not contact external services.
-
-## 📊 How It Works
-
-1. **Web Scraping**: The application scrapes Gameloot.in product pages using BeautifulSoup
-2. **Data Processing**: Extracts product names, prices, links, and stock status
-3. **Deduplication**: Removes duplicate products using smart comparison
-4. **Database Comparison**: Compares current scraped data with stored MongoDB data
-5. **Change Detection**: Identifies new products, restocked items, and sold-out products
-6. **Notification**: Sends Telegram alerts for any stock changes
-7. **Data Storage**: Updates MongoDB with current product information
-
-## 📁 Project Structure
-
-```
-Gameloot-scrape-alert/
-├── scraper.py              # Main scraping logic and scheduler
-├── telegram_helper.py      # Telegram bot integration
-├── logging_config.py       # Logging configuration
-├── dict_list_search.py     # Utility script for performance testing
-├── reqs.txt               # Python dependencies
-├── .env                   # Environment variables (create this)
-└── README.md              # This file
-```
-
-## Key Functions
-
-- `scrape_product_page()`: Scrapes individual product pages
-- `scrape_all_products()`: Iterates through all pages of a category
-- `process_gameloot_stock()`: Main processing function for stock changes
-- `send_telegram_message()`: Sends notifications via Telegram
-- `task_scheduler()`: Manages automated scraping intervals
-
-## 📝 Logging
-
-The application provides comprehensive logging with configurable levels:
-- **DEBUG**: Detailed scraping information
-- **INFO**: General operation status
-- **WARNING**: Non-critical issues
-- **ERROR**: Critical failures
-
-## ⚠️ Important Notes
-
-- **Rate Limiting**: Be mindful of Gameloot.in's server resources
-- **MongoDB Security**: Use strong authentication for production MongoDB instances
-- **Telegram Limits**: Messages are automatically split if they exceed 4096 characters
-- **Error Handling**: The application includes retry mechanisms for Telegram message sending
-- **Environment Security**: Never commit `.env` files to version control
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-This project is for educational and personal use. Please respect Gameloot.in's terms of service and implement appropriate rate limiting.
-
-## 🆘 Troubleshooting
-
-### Common Issues
-
-1. **MongoDB Connection Failed**
-   - Verify MongoDB is running
-   - Check `MONGODB_URI` in your `.env` file
-   - Verify connection string and credentials
-   - Ensure network connectivity
-
-2. **Telegram Messages Not Sending**
-   - Verify `TELEGRAM_BOT_TOKEN` is correct in `.env`
-   - Check chat IDs are valid in `telegram_helper.py`
-   - Ensure bot has permission to send messages
-
-3. **Scraping Fails**
-   - Check internet connection
-   - Verify Gameloot.in is accessible
-   - Review logging for specific error messages
-
-4. **Environment Variables Not Loading**
-   - Ensure `.env` file exists in project root
-   - Check variable names match exactly (case-sensitive)
-   - Restart the application after changing `.env`
-
-### Getting Help
-
-- Check the logs for detailed error information
-- Verify all environment variables are set correctly in `.env`
-- Ensure all dependencies are installed properly
-- Check that `.env` file is in the correct location
-
-## 🔮 Future Enhancements
-
-- Web interface for configuration
-- Email notifications as alternative to Telegram
-- Price change tracking and alerts
-- Historical price analysis
-- REST API for external integrations
+Interactive docs: `/docs`.

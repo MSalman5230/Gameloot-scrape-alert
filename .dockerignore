@@ -1,48 +1,25 @@
-# Git files
 .git
-.gitignore
 .github
-
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-
-# Virtual environments
+.gitignore
+.vscode
+.idea
 .venv
 venv/
 env/
-ENV/
-
-# Environment variables
 .env
-.env.local
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Documentation
-README.md
-*.md
-
-# Logs
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Test files
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
-
-# Distribution files
 dist/
 build/
 *.egg-info/
-
+tests/
+frontend/
+*.log
+.DS_Store
+Thumbs.db
